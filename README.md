@@ -104,15 +104,22 @@ All configurable under `idf.py menuconfig` -> *ESP32 PWM App*.
   Baud rate is 115200.
 - **SoftAP captive portal** (first-time setup): on a board without
   stored Wi-Fi credentials, the device brings up an open AP named
-  `ESP32-PWM-setup`. Join it from an Android phone — Android's
-  captive-portal detector auto-opens a browser at the setup page.
+  `ESP32-PWM-setup`. Join it from your phone and open **any** URL in
+  the browser — a DNS hijack redirects everything to the setup page.
+  On some Android phones the captive-portal "Sign in to Wi-Fi network"
+  notification fires automatically (stock Android 11+ works best);
+  Samsung One UI often doesn't fire it and needs a manual browser tap.
   Enter your home SSID + password; on success the page shows both
-  `http://esp32-pwm.local/` and the assigned IP. Credentials persist
-  in NVS so subsequent boots skip the AP and go straight to STA.
-- **Web dashboard** (Wi-Fi, after provisioning): browse to
-  `http://esp32-pwm.local/` or `http://<device-ip>/`. PWM freq/duty
-  Apply, RPM params, live status (20 Hz WebSocket push), OTA upload
-  form all work.
+  `http://esp32-pwm.local/` and the assigned raw IP. Credentials
+  persist in NVS so subsequent boots skip the AP and go straight to
+  STA.
+- **Web dashboard** (Wi-Fi, after provisioning): browse to the raw IP
+  shown on the success page (e.g. `http://192.168.1.47/`). The mDNS
+  name `http://esp32-pwm.local/` works in desktop browsers (Windows
+  with Bonjour, macOS, Linux with Avahi) but Chrome and most Android
+  browsers don't resolve `.local` names — use the raw IP there. PWM
+  freq/duty Apply, RPM params, live status (20 Hz WebSocket push),
+  OTA upload form all work.
 - **USB HID/CDC** (USB2, native USB with jumper on **USB-OTG**): the
   board enumerates as `USB Composite Device` → `HID-compliant
   vendor-defined device` + `USB 序列裝置 (COMx)`. HID report IDs and
