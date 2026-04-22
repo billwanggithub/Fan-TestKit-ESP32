@@ -2,6 +2,7 @@ idf_component_register(
     SRCS        "net_dashboard.c"
                 "ws_handler.c"
                 "provisioning.c"
+                "dns_hijack.c"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "."
     REQUIRES    esp_http_server
