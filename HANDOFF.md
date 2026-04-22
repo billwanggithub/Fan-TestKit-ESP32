@@ -1,90 +1,153 @@
 # Hand-off — ESP32-S3 PWM + RPM firmware
 
-Date: 2026-04-22 (updated 晚間，PWM band 作業)
-Branch: `feat/pwm-1hz-floor` (6 commits ahead of `main`, not pushed)
+Date: 2026-04-22 (晚間，IDF v6.0 migration)
+Branch: `chore/migrate-idf-v6.0` (off `feat/pwm-1hz-floor`)
 Working dir: `D:\github\ESP32_PWM`
-IDF: `C:\Espressif\frameworks\esp-idf-v5.5.1`
+IDF: `C:\esp\v6.0\esp-idf` (was `C:\Espressif\frameworks\esp-idf-v5.5.1`)
 
-## 🔴 OPEN BUG — PWM 某些頻率 read error（handoff 當下狀態）
+## ESP-IDF v6.0 migration — done & verified
 
-User report: "some frequency still read error". 沒給詳細資料、沒指明是哪些
-freq、也沒說 error 是 log 裡的 error 還是 scope 讀到錯的頻率。下一個
-session 要做的第一件事是跟 user 問：
+Migrated whole project up from v5.5.1 to v6.0. Hardware verification
+passed on real board: PWM band cross OK at multiple freqs (10/100/1000/
+1000000 Hz), boot log clean, Wi-Fi reconnect from NVS, USB composite
+enumerated, BLE provisioning still works.
 
-1. 是哪幾個 freq 值（commanded vs scope measured）？
-2. Error 是指 `control: pwm set failed:` log line，還是 scope 讀到錯頻率但
-   log 顯示 success？
-3. 是 same-band 裡出錯（例如 500 Hz → 600 Hz）還是 band crossing 出錯
-   （例如 152 Hz ↔ 153 Hz）？
+### Source / config changes applied
 
-已知 working: 1000 Hz 單獨設、1000 Hz → 100 Hz band crossing（MID→LO
-re-latch 修完後 scope 讀到正確的 100 Hz，counter-movement 診斷顯示 320 ticks
-per 1 ms = 320 kHz OK）。
+- `main/idf_component.yml` — IDF constraint `>=5.5.0` → `>=6.0.0`. Added
+  `espressif/network_provisioning ^1.2.0` (replaces removed built-in
+  `wifi_provisioning`). cJSON pulled in transitively as
+  `espressif/cjson` (was IDF built-in `json`).
+- `components/net_dashboard/CMakeLists.txt` — REQUIRES `wifi_provisioning`
+  → `espressif__network_provisioning`; `json` → `espressif__cjson`.
+- `components/net_dashboard/provisioning.c` — header `wifi_provisioning/*`
+  → `network_provisioning/*`; symbol prefix `wifi_prov_*` →
+  `network_prov_*`; event ID `WIFI_PROV_CRED_SUCCESS/FAIL` →
+  `NETWORK_PROV_WIFI_CRED_SUCCESS/FAIL` (note `WIFI_` infix because the
+  new component supports both Wi-Fi and Thread); `WIFI_PROV_END` →
+  `NETWORK_PROV_END` (no infix — generic event).
+- `components/usb_composite/CMakeLists.txt` — added `esp_ringbuf` to
+  REQUIRES; `freertos/ringbuf.h` no longer comes via the freertos
+  umbrella in v6.0.
+- `components/rpm_cap/rpm_cap.c` — removed `.flags.pull_up` from
+  `mcpwm_capture_channel_config_t` (field deleted in v6.0); replaced
+  with explicit `gpio_set_pull_mode()` call before
+  `mcpwm_new_capture_channel()`.
+- `components/pwm_gen/pwm_gen.c` — LO band `resolution_hz` 320 kHz →
+  625 kHz, `freq_min` 5 → 10. v6.0 changed
+  `MCPWM_GROUP_CLOCK_DEFAULT_PRESCALE` from 2 to 1 (group clock 80 MHz
+  → 160 MHz), so the v5.5 LO band no longer fits in the auto-resolver's
+  range without forcing a `group prescale conflict`. Floor moves up
+  from 5 Hz to 10 Hz; spec impact accepted. CLAUDE.md "PWM glitch-free
+  update mechanism" section has the full math.
+- `main/CMakeLists.txt` — added `esp_driver_uart` to REQUIRES; v6.0
+  split the monolithic `driver` component into per-peripheral pieces
+  and `driver/uart.h` no longer comes via the umbrella.
+- `sdkconfig.defaults` —
+  - `CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI=y` (unmask Wi-Fi event IDs in
+    network_provisioning)
+  - `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y` (v6.0 changed
+    protocomm default away from sec1; we keep PoP-based BLE
+    provisioning so we need the enum re-exposed)
+  - `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` + sibling `=n` setters (workaround
+    for v6.0 MCPWM band-cross bug — see Open issues below)
+- Comment in `usb_composite.c` about esp_tinyusb 1.7.x's HID
+  limitation still holds; descriptor logic unchanged.
 
-### Session 做過的事（背景）
+### Tooling
 
-今天的目標是把 PWM 下限從 153 Hz 降到更低。過程如下：
+- ESP-IDF v6.0 installed to `C:\esp\v6.0\esp-idf` via
+  `install.ps1 esp32s3`. Old v5.5.1 still present at
+  `C:\Espressif\frameworks\esp-idf-v5.5.1` for fallback (don't activate
+  both at once — Python venv collision).
+- Desktop shortcut **"ESP-IDF 6.0 PWM Project"** opens new PowerShell
+  with v6.0 env active, cwd at `D:\github\ESP32_PWM`. Created via
+  WScript.Shell COM in user `Desktop`.
+- PowerShell profile alias `esp6` (and `esp6 pwm`) added to
+  `D:\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
 
-1. 最早想做 1 Hz floor（3-band：HI 10 MHz / MID 160 kHz / LO 1 kHz）
-   → hardware 做不到。ESP32-S3 MCPWM group 0 只有一個共用 prescaler，
-   一旦 `mcpwm_new_timer` 第一次 commit 之後 `group->prescale` 就 locked。
-   想切 band 會撞到 `mcpwm_set_prescale(270): group prescale conflict,
-   already is 2 but attempt to 4` error。
-2. 改成 2-band：HI 10 MHz (timer_prescale=8) + LO 320 kHz
-   (timer_prescale=250)。兩個都落在 `group_prescale=2` 下 timer_prescale
-   ∈ [1..256] 的範圍。Floor 變 5 Hz。Commit `2d4649d`。
-3. 改完還是 wrong output：commanded 100 Hz 但 scope 讀 3.125 kHz
-   (= 10 MHz / 3200)。深入追 MCPWM driver + register dump 發現是
-   **hardware timer_prescale register 只在 STOP→START edge 才 latch**。
-   driver 的 `mcpwm_new_timer` 重用同一個 timer_id 的 hardware slot，
-   而 `timer_cfg1.timer_start` 欄位還停在前一個 session 留下的 mode=2
-   (START_NO_STOP)，再寫一次 mode=2 不產生 edge、新的 prescale 不 latch。
-4. 修法：`reconfigure_for_band` 在 `mcpwm_timer_enable` 之後，手動發
-   `STOP_EMPTY (mode=0)` → `START_NO_STOP (mode=2)` 造出 0→2 transition，
-   prescale 就 latch 了。1000→100 Hz 驗證過 OK。Commit 包在 `2d4649d` 裡。
+## 🟡 OPEN ISSUE — v6.0 MCPWM band-cross workaround not understood
 
-### 可能還沒 cover 的 case
+### Symptom
 
-想不到還沒測的 band crossing：
+After v6.0 migration, the first HI band → LO band cross outputs the PWM
+at 16× the requested frequency (period correct, prescale not actually
+latched). E.g. `pwm 100 50` → scope shows 1.6 kHz instead of 100 Hz.
+Driver's `mcpwm_set_prescale` returns OK; computed values are correct
+on paper (`group_prescale=1, timer_prescale=256, resolution=625kHz,
+period=6250`).
 
-- `pwm 5 50` (最低 LO 端)
-- `pwm 152 50` → `pwm 153 50` (HI↔LO 跨 band 的 boundary)
-- `pwm 153 50` → `pwm 152 50` (反向跨 band)
-- `pwm 1000000 50` (最高 HI 端)
-- 同 band 快速 update（500 → 600 → 500 → 600，應該 glitch-free 但可能踩別的 bug）
+Same bug pattern as the v5.5 STOP→START latch issue we already fixed in
+`reconfigure_for_band()` lines 219-235, but our existing fix is no
+longer sufficient under v6.0.
 
-現階段 `reconfigure_for_band` 的 STOP→START 拖了一個 TEZ cycle 才真的 stop。
-在 LO band 裡（5 Hz 一個 TEZ cycle = 200 ms），這段 "STOP→START latch" 可能
-比預期長很多。如果出錯的是 LO band 內的 freq，可能跟這個 timing 有關。
+### Workaround (currently applied)
 
-### 快速重現步驟（給下一 session）
+Two pieces, both required:
 
-```bash
-# ESP-IDF CMD shell (Start menu "ESP-IDF 5.5.1 CMD")
-cd D:\github\ESP32_PWM
-idf.py build
-idf.py -p COM24 flash       # 關閉 serial tool 再 flash
+1. `sdkconfig.defaults`: `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` so the
+   driver's `LOGD` calls compile in.
+2. `pwm_gen_init()` calls `esp_log_level_set("mcpwm", ESP_LOG_DEBUG)`
+   so those compiled-in calls actually fire.
+
+Bisected: removing **either** piece reproduces the bug. Both must be
+present.
+
+### Suspected (not confirmed) cause
+
+The microseconds spent in driver `LOGD` argument formatting introduce
+enough delay between MCPWM register writes for some shadow/latch
+register to settle. Without the delay, the next register access reads
+stale state. We did NOT confirm this with logic-analyser on the MCPWM
+register bus.
+
+### Why we shipped without root cause
+
+Migration was already at the end of a long session; further bisect
+would need a minimal repro project (no Wi-Fi/USB) and probably hardware
+register tracing. The workaround is non-invasive (cost ~few KB of LOGD
+format strings) and explicit at both the source-code site
+(`pwm_gen.c:165`) and the Kconfig (`sdkconfig.defaults` LOG_MAXIMUM
+section).
+
+### Investigation hooks for next session
+
+- Reproduce on minimal project: just `pwm_gen` + REPL, strip Wi-Fi/USB.
+  Confirms it's not interaction with another subsystem.
+- If it reproduces, read `/c/esp/v6.0/esp-idf/components/esp_driver_mcpwm/src/`
+  changelog vs v5.5.1. Look for the `mcpwm_hal_timer_reset` addition
+  (line 105 of `mcpwm_timer.c`) — that's a v6.0-only call that wasn't in
+  v5.5; might be the root cause.
+- Try replacing the LOGD-trick workaround with explicit
+  `esp_rom_delay_us(N)` between specific register writes inside
+  `reconfigure_for_band`. Minimum N that fixes it tells you the latch
+  window.
+- File against ESP-IDF GitHub if root cause is confirmed driver bug.
+
+### Verification recipe
+
+After any pwm_gen.c change, verify on scope:
+
+```text
+pwm 100 50    # scope GPIO4 → must read 100 Hz, not 1.6 kHz
+pwm 1000 50   # scope GPIO4 → must read 1000 Hz
+pwm 100 50    # scope GPIO4 → must read 100 Hz again
 ```
 
-Serial: 用「串口調試助手」COM24 115200，**必須勾 DTR + RTS 兩個 checkbox**
-再打開（CH343 auto-program circuit 會卡在 download mode，詳見 CLAUDE.md
-「CH343 DTR/RTS auto-program trap」section）。
-
-Relevant files:
-
-- `components/pwm_gen/pwm_gen.c` — band table, `pick_band`, `reconfigure_for_band`
-- `docs/superpowers/specs/2026-04-22-pwm-1hz-floor-design.md` — 原本 1 Hz
-  floor 的 design doc（**過時，hardware 做不到**，但可以參考 band-table 思路）
-- `docs/superpowers/plans/2026-04-22-pwm-1hz-floor.md` — 對應 plan，過時
-- `CLAUDE.md` — 「PWM glitch-free update mechanism」section 有最新的 2-band
-  table + group prescale constraint 說明
+Each `pwm` REPL command should also print
+`D (...) mcpwm: ... module calc prescale:N` line in monitor — if those
+lines are missing, the workaround is broken.
 
 ---
+
+> 以下 sections 是 v5.5.1 時代的歷史記錄（bring-up status, Bug 1-4
+> chronicle），保留給之後考古用。新 session 應該優先看上面的 v6.0
+> migration section，那才是 current 狀態。
 
 Design spec lives at
 `C:\Users\billw\.claude\plans\read-the-project-plan-pure-eagle.md`.
 
-## Bring-up status — ✅ 軟體端全部驗證，Secure Boot 待重開
+## Bring-up status — ✅ 軟體端全部驗證，Secure Boot 待重開 (v5.5.1 era)
 
 Chip: ESP32-S3 (QFN56 rev v0.2), 16 MB flash, 8 MB octal PSRAM
 (MAC `d0:cf:13:19:a3:70`), plain-text eFuse (未燒 SB/FE key).

@@ -9,9 +9,9 @@ idf_component_register(
                 esp_netif
                 esp_event
                 nvs_flash
-                wifi_provisioning
+                espressif__network_provisioning
                 bt
-                json
+                espressif__cjson
                 app_api
                 pwm_gen
                 rpm_cap

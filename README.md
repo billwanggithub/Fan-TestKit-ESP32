@@ -11,45 +11,57 @@ The release-hardening checklist is in `docs/release-hardening.md`.
 
 ## Status (2026-04-22)
 
-Working on real hardware as of commit `be4a9ad`:
-Wi-Fi provisioning + HTTP dashboard + WebSocket + USB composite
-(HID + CDC) + PWM init + RPM init all verified end-to-end.
+Migrated to **ESP-IDF v6.0** (was v5.5.1). PWM band-cross verified on
+scope; Wi-Fi provisioning, HTTP dashboard, WebSocket, USB composite
+(HID + CDC), PWM, RPM all working end-to-end on hardware.
 
 Secure Boot V2 + Flash Encryption are **currently disabled** —
 they caused a boot loop on first power-on with the untouched eFuse set.
 Tracking in [HANDOFF.md](HANDOFF.md) Bug 1.
 
+PWM frequency floor is **10 Hz** (was 5 Hz under v5.5.1). v6.0 changed
+the MCPWM driver's default group prescaler, raising the LO band
+resolution. Details in [CLAUDE.md](CLAUDE.md) "PWM glitch-free update
+mechanism".
+
 ## First-time build (Windows 11)
 
-1. **Install the ESP-IDF Python venv** (one-off, because the current
-   environment is Python 3.14 and IDF's venv for it is missing). Open a
-   plain `cmd.exe` and run:
+1. **Install the ESP-IDF v6.0 Python venv** (one-off). Open a plain
+   `cmd.exe` and run:
 
    ```bat
-   C:\Espressif\frameworks\esp-idf-v5.5.1\install.bat esp32s3
+   C:\esp\v6.0\esp-idf\install.bat esp32s3
    ```
 
 2. **Activate IDF** in your shell (each new terminal session). Easiest:
-   use the Start-menu shortcut **"ESP-IDF 5.5.1 CMD"** that Espressif
-   installs — it opens a pre-activated cmd.exe. Otherwise:
 
-   - **cmd.exe**: `C:\Espressif\frameworks\esp-idf-v5.5.1\export.bat`
-   - **PowerShell**: `C:\Espressif\frameworks\esp-idf-v5.5.1\export.ps1`
-   - **Git Bash / MSYS2**: `source /c/Espressif/frameworks/esp-idf-v5.5.1/export.sh`
+   - **Desktop shortcut "ESP-IDF 6.0 PWM Project"** — opens new
+     PowerShell with env active and cwd at this project.
+   - **`esp6 pwm` PowerShell alias** — activates v6.0 + cd to project
+     in the current PowerShell window. Defined in your PowerShell
+     profile.
 
-3. **Set target, build, flash**:
+   Manual activation if you prefer:
+
+   - **cmd.exe**: `C:\esp\v6.0\esp-idf\export.bat`
+   - **PowerShell**: `C:\esp\v6.0\esp-idf\export.ps1`
+   - **Git Bash / MSYS2**: `source /c/esp/v6.0/esp-idf/export.sh`
+
+3. **Build, flash**:
 
    ```bat
    cd D:\github\ESP32_PWM
-   idf.py set-target esp32s3
    idf.py build
-   idf.py -p COM3 flash monitor
+   idf.py -p COM24 flash monitor
    ```
 
-   The first build pulls `espressif/esp_tinyusb ~1.7.0` from the
-   component registry (see `main/idf_component.yml`). Replace `COM3`
-   with what Windows Device Manager assigns to the CH343P bridge on
-   USB1.
+   Target is locked to esp32s3 in `sdkconfig.defaults` so no
+   `set-target` needed. First build pulls four managed dependencies
+   from the component registry (see `main/idf_component.yml`):
+   `espressif/esp_tinyusb`, `espressif/network_provisioning`,
+   `espressif/cjson`, plus `espressif/tinyusb` as a transitive dep.
+   Replace `COM24` with what Windows Device Manager assigns to the
+   CH343P bridge on USB1.
 
 ### sdkconfig trap
 
