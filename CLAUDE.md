@@ -24,16 +24,28 @@ RGB LED is on GPIO48.
 
 ## Build & flash workflow (Windows)
 
-ESP-IDF lives at `C:\Espressif\frameworks\esp-idf-v5.5.1`. Activate with
-the Start-menu **"ESP-IDF 5.5.1 CMD"** shortcut (easiest), or
-`export.bat` / `export.ps1` from cmd/PowerShell. `export.sh` only works
-in Git Bash/MSYS2.
+ESP-IDF v6.0 lives at `C:\esp\v6.0\esp-idf`. (We migrated up from v5.5.1
+in 2026-04 — see `HANDOFF.md` for the migration notes.) Activate with
+either:
+
+- Desktop shortcut **"ESP-IDF 6.0 PWM Project"** — opens a new PowerShell
+  with env active and cwd already at this project. Easiest for daily work.
+- `esp6 pwm` PowerShell alias — activates v6.0 in the current PowerShell
+  window AND cd's to this project. Defined in
+  `D:\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
+- `C:\esp\v6.0\esp-idf\export.ps1` (PowerShell) or `export.bat` (cmd) —
+  raw activation; no auto-cd. `export.sh` only works in Git Bash/MSYS2.
 
 ```bash
-idf.py set-target esp32s3     # once
+idf.py set-target esp32s3     # once (already done; sdkconfig.defaults pins it)
 idf.py build
-idf.py -p COM3 flash monitor  # plain-text flash (current dev build has no Secure Boot)
+idf.py -p COM24 flash monitor # plain-text flash (current dev build has no Secure Boot)
 ```
+
+The previous v5.5.1 install at `C:\Espressif\frameworks\esp-idf-v5.5.1`
+is still on disk; don't `export` it inside a v6.0 shell — Python venv
+collisions. v5.5.1 is reachable via the original installer Start-menu
+shortcut **"ESP-IDF 5.5.1 CMD"** if you ever need to fall back.
 
 現階段 `sdkconfig.defaults` 把 `CONFIG_SECURE_BOOT` 跟
 `CONFIG_SECURE_FLASH_ENC_ENABLED` 都關掉 (temporary workaround)，所以
@@ -158,7 +170,7 @@ Invariants:
 `mcpwm_timer_stop` / restart in the update path for same-band changes —
 that's where glitches come from.
 
-Frequency range is **5 Hz ~ 1 MHz**. The 16-bit MCPWM counter
+Frequency range is **10 Hz ~ 1 MHz**. The 16-bit MCPWM counter
 (`MCPWM_LL_MAX_COUNT_VALUE = 0x10000`) cannot span that range with a
 single fixed `resolution_hz`, so `pwm_gen.c` defines a 2-band table and
 picks a band per call:
@@ -166,22 +178,57 @@ picks a band per call:
 | Band | resolution_hz | freq range       | period_ticks   | duty bits |
 |------|---------------|------------------|----------------|-----------|
 | HI   | 10 MHz        | 153 Hz – 1 MHz   | 10 – 65359     | 3.3 – 16  |
-| LO   | 320 kHz       | 5 Hz – 152 Hz    | 2105 – 64000   | 11 – 16   |
+| LO   | 625 kHz       | 10 Hz – 152 Hz   | 4112 – 62500   | 12 – 16   |
 
 **Critical constraint — MCPWM group prescaler is committed on first use
 and cannot be changed.** Once `mcpwm_new_timer()` runs the first time,
-`group->prescale` is locked (default 2 → group clock = 80 MHz). Every
-subsequent timer in the same group must share that group_prescale; only
-the per-timer `timer_prescale` (range [1..256]) can vary. That gives a
-max 256× spread of resolutions within one group. HI=10 MHz uses
-timer_prescale=8; LO=320 kHz uses timer_prescale=250. Both resolutions
-picked to keep timer_prescale ≤ 256 at the driver's default
-`group_prescale=2`, so `new_timer()` with the other resolution doesn't
-trigger `"group prescale conflict"` errors.
+`group->prescale` is locked. Every subsequent timer in the same group
+must share that group_prescale; only the per-timer `timer_prescale`
+(range [1..256]) can vary. That gives a max 256× spread of resolutions
+within one group.
 
-1 Hz – 4 Hz cannot be reached this way: it would require
-`timer_prescale > 256`. Extending below 5 Hz requires switching the
-generator to LEDC or using MCPWM group 1 — both are bigger refactors.
+**ESP-IDF v6.0 changed `MCPWM_GROUP_CLOCK_DEFAULT_PRESCALE` from 2 to
+1** (see `esp_driver_mcpwm/src/mcpwm_private.h:55`). Group clock is now
+160 MHz (was 80 MHz). At gp=1 the resolution range is 160 MHz down to
+160 MHz / 256 = 625 kHz. HI=10 MHz uses timer_prescale=16; LO=625 kHz
+uses timer_prescale=256. Both fit within gp=1's range, so cross-band
+swaps don't trigger `"group prescale conflict"` errors.
+
+The driver does not expose a public knob to force a different
+group_prescale (`mcpwm_timer_config_t` has no such field), and the
+auto-resolver in `mcpwm_set_prescale` greedily picks the smallest
+group_prescale that satisfies the first call. That locks us at gp=1
+forever once HI band's first `new_timer` runs.
+
+1 Hz – 9 Hz cannot be reached at gp=1 + 16-bit counter. Extending
+below 10 Hz requires switching the generator to LEDC (separate
+peripheral with fractional dividers) or sharing group 1 with a second
+operator/generator chain (but only one generator can drive the same
+GPIO at a time, so cross-band swaps would need full generator
+delete+recreate — slower than the current TEZ-based reconfigure). Both
+are bigger refactors.
+
+### v6.0 band-cross workaround (timing-sensitive)
+
+After the v6.0 migration, the first HI→LO band cross emits an output
+frequency 16× higher than requested (e.g. 100 Hz outputs as 1.6 kHz —
+period correct, but timer_prescale 16 from HI carries over instead of
+LO's 256). The fix that consistently works:
+
+1. `sdkconfig.defaults` sets `CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y` so the
+   driver's `LOGD` calls are compiled in (not no-op'd).
+2. `pwm_gen_init()` calls `esp_log_level_set("mcpwm", ESP_LOG_DEBUG)`
+   so those compiled-in calls actually fire at runtime.
+
+Removing **either** piece reproduces the bug. Suspected cause: the
+microseconds spent inside the driver's `LOGD` argument formatting let
+some MCPWM register write settle between writes; without that delay,
+the next `read` sees stale state. Root cause is **not isolated** —
+treated as a known-good workaround for now. Full bisect would need a
+minimal repro project (no Wi-Fi/USB) and probably register-level traces.
+
+**If you remove either the Kconfig or the runtime call, scope GPIO4
+after a `pwm 100 50` first** to confirm you didn't bring the bug back.
 
 **Same-band updates** (e.g. 500 Hz → 600 Hz) stay glitch-free via TEZ.
 **Band-crossing updates** (152 Hz ↔ 153 Hz) go through
@@ -219,11 +266,28 @@ Step 0 要改寫成「先確認 non-secure build 全功能驗證過，再單 fea
 `secure_boot_signing_key.pem` 已 gitignored；每個 dev 自己用
 `espsecure.py generate_signing_key --version 2` 產。
 
-## esp_tinyusb pinning + composite descriptor
+## Component manager dependencies
 
-Pinned to `espressif/esp_tinyusb ~1.7.0` via `main/idf_component.yml`。
+`main/idf_component.yml` 上目前 pin 三個 component：
 
-**Important**: 1.7.x 的 default config descriptor **不處理 HID**（只 cover
+- **`espressif/esp_tinyusb ~1.7.0`** — composite HID + CDC descriptor。
+  v6.0 IDF 跟 1.7.x 仍相容（驗證過 build + 枚舉 OK）。
+- **`espressif/network_provisioning ^1.2.0`** — v6.0 把原本 IDF built-in
+  的 `wifi_provisioning` component 拔掉、搬到 component manager 並
+  rename 成 `network_provisioning`，API prefix 從 `wifi_prov_*` 變
+  `network_prov_*`，event ID `WIFI_PROV_CRED_*` 改 `NETWORK_PROV_WIFI_CRED_*`
+  （多了 `WIFI_` infix，因為 component 同時支援 Wi-Fi 跟 Thread）。
+  搭配 `CONFIG_NETWORK_PROV_NETWORK_TYPE_WIFI=y` 才會 unmask Wi-Fi event。
+  V6.0 預設關掉 protocomm SECURITY_1 enum，需要
+  `CONFIG_ESP_PROTOCOMM_SUPPORT_SECURITY_VERSION_1=y` 重新打開（手機端
+  ESP BLE Provisioning app 用 PoP-based 握手，不能改 security 2 SRP6a）。
+- **`espressif/cjson ^1.7.19`** — v6.0 把 IDF built-in `json` component
+  拔掉，cJSON 改 component manager 上 `espressif/cjson`。
+  `net_dashboard/CMakeLists.txt` 的 REQUIRES 寫 `espressif__cjson`。
+
+### esp_tinyusb 1.7.x 的 HID 限制
+
+1.7.x 的 default config descriptor **不處理 HID**（只 cover
 CDC/MSC/NCM/VENDOR）。開 `CFG_TUD_HID > 0` 就必須提供自製
 `configuration_descriptor`，否則 `tinyusb_set_descriptors` 會 reject。
 `usb_composite.c` 的 `s_configuration_descriptor[]` 就是這個 —— IF0 HID,
@@ -238,6 +302,24 @@ descriptor 時 compile error 會立刻提醒你同步更新。
 升級到 esp_tinyusb 2.x 時 `tinyusb_config_t` 改用
 `full_speed_config / high_speed_config`，上述 descriptor bytes 格式不變，
 但 struct field name 要跟著改。
+
+### v6.0 driver split (主要 component REQUIRES 變動)
+
+v5.x 的 `driver` 變成多 per-peripheral components。如果某個 component
+include `driver/uart.h` / `driver/gpio.h` / `driver/i2c.h` 之類 header
+卻 build error 「no such file」，是 v6.0 抽掉 `driver` umbrella 對應
+header 的 transitive include。在 component CMakeLists 加：
+
+| header               | REQUIRES                |
+|----------------------|-------------------------|
+| `driver/uart.h`      | `esp_driver_uart`       |
+| `driver/gpio.h`      | `esp_driver_gpio`       |
+| `driver/i2c.h`       | `esp_driver_i2c`        |
+| `driver/mcpwm_*.h`   | `esp_driver_mcpwm`      |
+| `freertos/ringbuf.h` | `esp_ringbuf`           |
+
+`driver` umbrella 仍存在但只有 i2c/touch_sensor/twai 還掛在底下，其他
+都搬走了。
 
 ## Wire protocols (host tool contracts)
 

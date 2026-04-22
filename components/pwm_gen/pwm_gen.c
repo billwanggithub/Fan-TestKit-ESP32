@@ -11,7 +11,7 @@
 #include "freertos/task.h"
 
 // MCPWM 的 timer counter 是 16-bit（MCPWM_LL_MAX_COUNT_VALUE = 0x10000），所以
-// period_ticks 必須 ∈ [2, 65535]。一個固定 resolution_hz 覆蓋不了 5 Hz ~ 1 MHz，
+// period_ticks 必須 ∈ [2, 65535]。一個固定 resolution_hz 覆蓋不了 10 Hz ~ 1 MHz，
 // 於是用 2-band 動態 resolution：每次 pwm_gen_set() 依 freq 挑適合的 band。
 // 同 band 內走 TEZ latch glitch-free 更新，跨 band 需要 teardown→recreate
 // timer、有 ~tens of µs 的 output 斷點。
@@ -19,19 +19,31 @@
 // **Critical constraint**: ESP32-S3 MCPWM group 0 share 一個 group prescaler，
 // 一旦第一次 new_timer 把 group->prescale committed 之後就不能變。因此 HI / LO
 // 兩個 band 的 resolution_hz 必須落在「同一個 group_prescale 下 timer_prescale
-// 都 ∈ [1..256]」的範圍內。driver 的 default group_prescale=2（group clock =
-// 80 MHz），timer_prescale 範圍 [1..256] 對應 module resolution = 80 MHz ~
-// 312.5 kHz。HI 用 10 MHz（timer_prescale=8），LO 用 320 kHz（timer_prescale=250），
-// 兩個都在範圍內且共用 group_prescale=2。
+// 都 ∈ [1..256]」的範圍內。
+//
+// **ESP-IDF v6.0 改變**：driver 的 default group_prescale 從 v5.x 的 2 變成 1
+// (見 esp_driver_mcpwm/src/mcpwm_private.h:55 MCPWM_GROUP_CLOCK_DEFAULT_PRESCALE)。
+// group clock 從 80 MHz 升到 160 MHz，timer_prescale [1..256] 對應 module
+// resolution range = 160 MHz ~ 625 kHz。HI 用 10 MHz（timer_prescale=16），
+// LO 用 625 kHz（timer_prescale=256），兩個都在範圍內且共用 group_prescale=1。
+//
+// 為什麼不沿用 v5.x 的 LO=320 kHz？因為 160 MHz / 320 kHz = 500 > 256，driver
+// 的 auto-resolver 會嘗試把 group_prescale 改到 2 → group prescale conflict。
+// driver 沒提供 public API 可以強制 group_prescale=2 (mcpwm_timer_config_t
+// 沒有相關欄位)，第一個 mcpwm_new_timer 是用 HI 10 MHz，160 MHz / 10 MHz = 16
+// 落在範圍內，所以 group 就 commit 在 prescale=1 了。
 //
 //   Band  resolution_hz  freq range       period_ticks    duty bits
 //   HI    10 MHz         153 Hz – 1 MHz   10 – 65359      3.3 – 16
-//   LO    320 kHz        5 Hz – 152 Hz    2105 – 64000    11 – 16
+//   LO    625 kHz        10 Hz – 152 Hz   4112 – 62500    12 – 16
 //
-// 1 Hz ~ 4 Hz 需要更低 resolution（resolution ≤ 65 kHz），那會超出 group_prescale=2
-// 允許的 timer_prescale 範圍，會 trigger "group prescale conflict" error。要延伸到
-// 1 Hz 得改用 LEDC peripheral 或第二個 MCPWM group（本檔案 out of scope）。
-#define PWM_FREQ_MIN_HZ 5u
+// 1 Hz ~ 9 Hz 需要更低 resolution（resolution < 625 kHz），不可達於目前的
+// group_prescale=1 + 16-bit timer 組合。要延伸到 1 Hz 得改用 LEDC peripheral
+// (它有獨立的 timer prescaler 跟 div_param fractional divider)，或在 LO band
+// 改用 MCPWM group 1（但同顆 GPIO 不能同時掛兩個 group 的 generator，band cross
+// 會要 delete+recreate 整條 generator chain，比現有 teardown 還久）。本檔案
+// out of scope。
+#define PWM_FREQ_MIN_HZ 10u
 #define PWM_FREQ_MAX_HZ 1000000u
 
 typedef struct {
@@ -42,7 +54,7 @@ typedef struct {
 // Ordered by descending resolution. First entry with freq >= freq_min wins.
 static const pwm_band_t s_bands[] = {
     { 10000000u, 153u },   // HI
-    {   320000u,   5u },   // LO
+    {   625000u,  10u },   // LO  (v6.0: was 320 kHz / 5 Hz under v5.x)
 };
 
 static const char *TAG = "pwm_gen";
@@ -146,6 +158,18 @@ esp_err_t pwm_gen_init(const pwm_gen_config_t *cfg)
     ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_pwm.timer, MCPWM_TIMER_START_NO_STOP));
 
     s_pwm.initialised = true;
+
+    // **v6.0 MCPWM band-cross workaround** — see sdkconfig.defaults
+    // CONFIG_LOG_MAXIMUM_LEVEL_DEBUG comment for full context.
+    // tl;dr: without BOTH `LOG_MAXIMUM_LEVEL_DEBUG=y` (compile-time) AND
+    // this runtime `esp_log_level_set` call, the first HI→LO band cross
+    // produces 16× the requested frequency (period correct, prescale
+    // not actually latched). Removing either piece reproduces the bug.
+    // Suspected: driver LOGD argument formatting introduces enough delay
+    // to let an MCPWM register write settle. Root cause not isolated;
+    // tracked in HANDOFF.md. Do NOT remove without confirming on scope.
+    esp_log_level_set("mcpwm", ESP_LOG_DEBUG);
+
     ESP_LOGI(TAG, "init ok: pwm_gpio=%d trigger_gpio=%d freq=%lu duty=%.1f%% res=%lu",
              s_pwm.pwm_gpio, s_pwm.trigger_gpio,
              (unsigned long)s_pwm.freq_hz, s_pwm.duty_pct,

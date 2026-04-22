@@ -13,6 +13,10 @@ idf_component_register(
                 pwm_gen
                 rpm_cap
                 ota_core
+                # v6.0: freertos/ringbuf.h moved out of freertos transitive
+                # closure; usb_cdc_task.c uses RingbufHandle_t for SLIP frame
+                # buffering, so explicit dep is now required.
+                esp_ringbuf
     # HID/CDC callbacks (tud_hid_descriptor_report_cb, tud_hid_*_cb) satisfy
     # weak references from TinyUSB core archives that appear earlier on the
     # link line; WHOLE_ARCHIVE forces our objects in so the symbols resolve.

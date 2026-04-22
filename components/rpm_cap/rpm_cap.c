@@ -5,6 +5,8 @@
 #include <inttypes.h>
 
 #include "driver/mcpwm_prelude.h"
+#include "driver/gpio.h"   // ESP-IDF v6.0: gpio_set_pull_mode() replaces removed
+                            // mcpwm_capture_channel_config_t.flags.pull_up.
 #include "esp_timer.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -287,12 +289,18 @@ esp_err_t rpm_cap_init(const rpm_cap_config_t *cfg)
     };
     ESP_ERROR_CHECK(mcpwm_new_capture_timer(&cap_timer_cfg, &s_cap.cap_timer));
 
+    // v6.0 拔掉 capture channel config 上的 .flags.pull_up，改成獨立 GPIO call。
+    // 順序: pull mode 必須在 mcpwm_new_capture_channel 之前 set，因為 new_channel
+    // 會 take over GPIO matrix routing；之後再改 pull mode 不會被覆蓋（pull
+    // 是 pad-level 設定，跟 IO_MUX function selection 正交），但放前面語意比較
+    // 清楚 — pin 完全 configure 完才 hand off 給 MCPWM。
+    ESP_ERROR_CHECK(gpio_set_pull_mode(s_cap.input_gpio, GPIO_PULLUP_ONLY));
+
     mcpwm_capture_channel_config_t cap_ch_cfg = {
         .gpio_num  = s_cap.input_gpio,
         .prescale  = 1,
         .flags.pos_edge = true,
         .flags.neg_edge = false,
-        .flags.pull_up  = true,
     };
     ESP_ERROR_CHECK(mcpwm_new_capture_channel(s_cap.cap_timer, &cap_ch_cfg, &s_cap.cap_chan));
 
