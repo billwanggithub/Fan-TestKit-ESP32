@@ -23,7 +23,10 @@ idf_component_register(
                 # SoftAP captive portal DNS hijack (raw UDP socket).
                 lwip
                 # mDNS advertisement of esp32-pwm.local after provisioning.
-                mdns
+                # v6.0 moved mdns from built-in to the component manager, so
+                # REQUIRES uses the namespaced form (matches espressif/mdns
+                # entry in main/idf_component.yml).
+                espressif__mdns
     EMBED_TXTFILES "web/index.html"
                    "web/app.js"
                    "web/app.css"

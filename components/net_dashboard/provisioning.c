@@ -68,7 +68,9 @@ static esp_err_t on_credentials(const char *ssid, const char *password,
     EventBits_t bits = xEventGroupWaitBits(s_ev, EV_GOT_IP | EV_STA_FAIL,
                                            pdTRUE, pdFALSE, pdMS_TO_TICKS(20000));
     if (bits & EV_GOT_IP) {
-        strncpy(out->ip, s_last_ip, sizeof(out->ip) - 1);
+        // snprintf instead of strncpy so gcc -Wstringop-truncation stays
+        // happy; out->ip is zero-init'd by the caller.
+        snprintf(out->ip, sizeof(out->ip), "%s", s_last_ip);
         out->mdns = "esp32-pwm.local";
         return ESP_OK;
     }

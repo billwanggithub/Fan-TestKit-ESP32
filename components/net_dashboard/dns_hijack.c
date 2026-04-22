@@ -108,10 +108,15 @@ esp_err_t dns_hijack_start(void)
     }
 
     s_run = true;
-    if (xTaskCreate(dns_task, "dns_hijack", 3072, NULL, 2, &s_task) != pdPASS) {
+    // xTaskCreate wants a non-volatile handle pointer. Stash into a local
+    // and assign after creation — the volatile qualifier on s_task is for
+    // the cross-core READ in dns_hijack_stop, not this one-time write.
+    TaskHandle_t h = NULL;
+    if (xTaskCreate(dns_task, "dns_hijack", 3072, NULL, 2, &h) != pdPASS) {
         close(s_sock); s_sock = -1;
         return ESP_FAIL;
     }
+    s_task = h;
     ESP_LOGI(TAG, "dns hijack up (UDP:53 → 192.168.4.1)");
     return ESP_OK;
 }

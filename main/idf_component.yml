@@ -12,3 +12,15 @@ dependencies:
     version: ">=6.0.0"
   espressif/esp_tinyusb:
     version: "~1.7.0"
+  # cJSON — used by net_dashboard/ws_handler.c and captive_portal.c. In the
+  # previous BLE-provisioning setup it came in transitively via
+  # `espressif/network_provisioning`; now that we dropped BLE provisioning
+  # we must list it as a direct dependency so the component manager keeps
+  # it around after `NOTICE: Deleting unused components`.
+  espressif/cjson:
+    version: "^1.7.19"
+  # mdns was a built-in component in IDF v5.x but moved to the component
+  # manager in v6.0. Used by components/net_dashboard/mdns_svc.c to
+  # advertise `esp32-pwm.local` once STA is up.
+  espressif/mdns:
+    version: "^1.8.0"
