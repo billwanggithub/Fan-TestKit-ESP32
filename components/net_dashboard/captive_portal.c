@@ -206,14 +206,13 @@ esp_err_t captive_portal_start(captive_portal_creds_cb_t cb)
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
     cfg.server_port = 80;
     cfg.uri_match_fn = httpd_uri_match_wildcard;   // lets catchall match *
-    // Samsung's captive-portal detector opens several parallel TCP
-    // connections to the probe URL within a few hundred milliseconds and
-    // tears down the ones that don't respond first. Default is 7 sockets
-    // which can be overrun during the probe burst, causing some probes
-    // to see RST and report "no captive portal." Bump to 13.
-    cfg.max_open_sockets = 13;
-    // Smaller recv timeout so slow-closing probe connections don't hold
-    // a socket for the default 5 s.
+    // Max 7 is the LWIP-imposed ceiling (10 sockets total, 3 reserved
+    // internally by httpd). Raising further needs CONFIG_LWIP_MAX_SOCKETS
+    // bumped in sdkconfig.defaults, which isn't worth the RAM cost right
+    // now — the Samsung probe burst tolerates socket recycling at 7.
+    cfg.max_open_sockets = 7;
+    // Tight recv timeout so captive-probe connections that open, send
+    // zero bytes, and sit don't block sockets for the full default 5 s.
     cfg.recv_wait_timeout = 2;
     cfg.send_wait_timeout = 2;
 
