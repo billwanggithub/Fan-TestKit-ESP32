@@ -26,4 +26,5 @@ idf_component_register(
     EMBED_TXTFILES "web/index.html"
                    "web/app.js"
                    "web/app.css"
+                   "web/setup.html"
 )
