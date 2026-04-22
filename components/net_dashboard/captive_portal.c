@@ -70,10 +70,17 @@ static esp_err_t save_wifi_post(httpd_req_t *req)
         return ESP_OK;
     }
     char body[513] = {0};
-    int n = httpd_req_recv(req, body, req->content_len);
-    if (n <= 0) {
-        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "read failed");
-        return ESP_OK;
+    int received = 0;
+    int remaining = (int)req->content_len;
+    while (remaining > 0) {
+        int n = httpd_req_recv(req, body + received, remaining);
+        if (n <= 0) {
+            if (n == HTTPD_SOCK_ERR_TIMEOUT) continue;  // retry transient timeout
+            httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "read failed");
+            return ESP_OK;
+        }
+        received += n;
+        remaining -= n;
     }
 
     cJSON *root = cJSON_Parse(body);
@@ -122,7 +129,8 @@ static esp_err_t save_wifi_post(httpd_req_t *req)
 static esp_err_t success_get(httpd_req_t *req)
 {
     // Pull current STA IP + mDNS and substitute into the template.
-    // We rewrite into a stack buffer; template is ~700 bytes, buffer 1 KB safe.
+    // Rewrite into a stack buffer (2 KB) so concurrent /success requests
+    // do not corrupt each other. Template is ~700 bytes after expansion.
     esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
     esp_netif_ip_info_t info = {0};
     if (sta) esp_netif_get_ip_info(sta, &info);
@@ -130,7 +138,7 @@ static esp_err_t success_get(httpd_req_t *req)
     snprintf(ip_buf, sizeof(ip_buf), IPSTR, IP2STR(&info.ip));
 
     const size_t tpl_len = (size_t)(success_html_end - success_html_start - 1);
-    static char rendered[2048];
+    char rendered[2048];
     if (tpl_len + 64 > sizeof(rendered)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template too large");
         return ESP_OK;
