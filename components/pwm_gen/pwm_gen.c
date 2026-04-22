@@ -11,18 +11,30 @@
 #include "freertos/task.h"
 
 // MCPWM 的 timer counter 是 16-bit（MCPWM_LL_MAX_COUNT_VALUE = 0x10000），所以
-// period_ticks 必須 ∈ [2, 65535]。resolution_hz 是 driver 內部 prescaler 算完
-// 之後 counter 遞增的速率；為了在整個 freq 範圍都留合理 duty resolution，固定
-// resolution 為 10 MHz：
-//   1 MHz   → period=10       (3.3 bits duty)
-//   100 kHz → period=100      (6.6 bits)
-//   10 kHz  → period=1000     (10 bits)
-//   1 kHz   → period=10000    (13 bits)
-//   153 Hz  → period=65359    (16 bits，接近 period 上限)
-// freq 下限因此是 10e6/65535 ≈ 153 Hz。
-#define PWM_RESOLUTION_HZ 10000000u
-#define PWM_FREQ_MIN_HZ   153u
-#define PWM_FREQ_MAX_HZ   1000000u
+// period_ticks 必須 ∈ [2, 65535]。一個固定 resolution_hz 覆蓋不了 1 Hz ~ 1 MHz
+// 六個 decade，於是用 3-band 動態 resolution：每次 pwm_gen_set() 依 freq
+// 挑「能在 16-bit counter 內塞下 period」的最高 resolution。同 band 內走
+// TEZ latch glitch-free 更新，跨 band 需要 teardown→recreate timer（oper /
+// cmpr / gen 物件保留並重新 connect）、會有 ~tens of µs 的 output 斷點。
+//
+//   Band  resolution_hz  freq range       period_ticks    duty bits
+//   HI    10 MHz         153 Hz – 1 MHz   10 – 65359      3.3 – 16
+//   MID   160 kHz        3 Hz – 152 Hz    1052 – 53333    10 – 16
+//   LO    1 kHz          1 Hz – 2 Hz      500 – 1000      9 – 10
+#define PWM_FREQ_MIN_HZ 1u
+#define PWM_FREQ_MAX_HZ 1000000u
+
+typedef struct {
+    uint32_t resolution_hz;
+    uint32_t freq_min;   // inclusive lower bound; freq < freq_min falls to next band
+} pwm_band_t;
+
+// Ordered by descending resolution. First entry with freq >= freq_min wins.
+static const pwm_band_t s_bands[] = {
+    { 10000000u, 153u },   // HI
+    {   160000u,   3u },   // MID
+    {     1000u,   1u },   // LO
+};
 
 static const char *TAG = "pwm_gen";
 
@@ -37,17 +49,28 @@ static struct {
     uint32_t                  freq_hz;
     float                     duty_pct;
     uint32_t                  period_ticks;
+    uint32_t                  resolution_hz;
 } s_pwm;
 
-static inline uint32_t freq_to_period_ticks(uint32_t freq_hz)
+static const pwm_band_t *pick_band(uint32_t freq_hz)
+{
+    for (size_t i = 0; i < sizeof(s_bands) / sizeof(s_bands[0]); ++i) {
+        if (freq_hz >= s_bands[i].freq_min) return &s_bands[i];
+    }
+    return NULL;
+}
+
+static inline uint32_t freq_to_period_ticks(uint32_t resolution_hz, uint32_t freq_hz)
 {
     if (freq_hz == 0) return 0;
-    return PWM_RESOLUTION_HZ / freq_hz;
+    return resolution_hz / freq_hz;
 }
 
 uint8_t pwm_gen_duty_resolution_bits(uint32_t freq_hz)
 {
-    uint32_t period = freq_to_period_ticks(freq_hz);
+    const pwm_band_t *band = pick_band(freq_hz);
+    if (!band) return 0;
+    uint32_t period = freq_to_period_ticks(band->resolution_hz, freq_hz);
     if (period < 2) return 0;
     uint8_t bits = 0;
     while ((1u << bits) <= period) bits++;
@@ -63,16 +86,18 @@ esp_err_t pwm_gen_init(const pwm_gen_config_t *cfg)
     s_pwm.pwm_gpio     = cfg->pwm_gpio;
     s_pwm.trigger_gpio = cfg->trigger_gpio;
 
-    // Start at a safe known state: 1 kHz, 0% duty.
+    // Start at a safe known state: 1 kHz, 0% duty. Falls into the HI band.
     const uint32_t init_freq = 1000;
-    s_pwm.period_ticks = freq_to_period_ticks(init_freq);
-    s_pwm.freq_hz      = init_freq;
-    s_pwm.duty_pct     = 0.0f;
+    const pwm_band_t *band = pick_band(init_freq);
+    s_pwm.resolution_hz = band->resolution_hz;
+    s_pwm.period_ticks  = freq_to_period_ticks(band->resolution_hz, init_freq);
+    s_pwm.freq_hz       = init_freq;
+    s_pwm.duty_pct      = 0.0f;
 
     mcpwm_timer_config_t timer_cfg = {
         .group_id      = 0,
         .clk_src       = MCPWM_TIMER_CLK_SRC_DEFAULT,
-        .resolution_hz = PWM_RESOLUTION_HZ,
+        .resolution_hz = s_pwm.resolution_hz,
         .count_mode    = MCPWM_TIMER_COUNT_MODE_UP,
         .period_ticks  = s_pwm.period_ticks,
     };
@@ -112,9 +137,55 @@ esp_err_t pwm_gen_init(const pwm_gen_config_t *cfg)
     ESP_ERROR_CHECK(mcpwm_timer_start_stop(s_pwm.timer, MCPWM_TIMER_START_NO_STOP));
 
     s_pwm.initialised = true;
-    ESP_LOGI(TAG, "init ok: pwm_gpio=%d trigger_gpio=%d freq=%lu duty=%.1f%%",
+    ESP_LOGI(TAG, "init ok: pwm_gpio=%d trigger_gpio=%d freq=%lu duty=%.1f%% res=%lu",
              s_pwm.pwm_gpio, s_pwm.trigger_gpio,
-             (unsigned long)s_pwm.freq_hz, s_pwm.duty_pct);
+             (unsigned long)s_pwm.freq_hz, s_pwm.duty_pct,
+             (unsigned long)s_pwm.resolution_hz);
+    return ESP_OK;
+}
+
+// Tear down the current timer and bring up a new one with a different
+// resolution_hz / period_ticks combination. Operator / comparator / generator
+// objects are retained and reconnected — their action config (high on TEZ,
+// low on compare) is preserved. Call site already validated band and period.
+static esp_err_t reconfigure_for_band(const pwm_band_t *band,
+                                      uint32_t new_period,
+                                      uint32_t new_compare)
+{
+    esp_err_t err;
+
+    err = mcpwm_timer_start_stop(s_pwm.timer, MCPWM_TIMER_STOP_EMPTY);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer stop: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_timer_disable(s_pwm.timer);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer disable: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_del_timer(s_pwm.timer);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer del: %s", esp_err_to_name(err)); return err; }
+    s_pwm.timer = NULL;
+
+    mcpwm_timer_config_t timer_cfg = {
+        .group_id      = 0,
+        .clk_src       = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = band->resolution_hz,
+        .count_mode    = MCPWM_TIMER_COUNT_MODE_UP,
+        .period_ticks  = new_period,
+    };
+    err = mcpwm_new_timer(&timer_cfg, &s_pwm.timer);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer new: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_operator_connect_timer(s_pwm.oper, s_pwm.timer);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "oper connect: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_comparator_set_compare_value(s_pwm.cmpr, new_compare);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "cmpr set: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_timer_enable(s_pwm.timer);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer enable: %s", esp_err_to_name(err)); return err; }
+
+    err = mcpwm_timer_start_stop(s_pwm.timer, MCPWM_TIMER_START_NO_STOP);
+    if (err != ESP_OK) { ESP_LOGE(TAG, "timer start: %s", esp_err_to_name(err)); return err; }
+
     return ESP_OK;
 }
 
@@ -124,26 +195,37 @@ esp_err_t pwm_gen_set(uint32_t freq_hz, float duty_pct)
     if (freq_hz < PWM_FREQ_MIN_HZ || freq_hz > PWM_FREQ_MAX_HZ) return ESP_ERR_INVALID_ARG;
     if (duty_pct < 0.0f || duty_pct > 100.0f) return ESP_ERR_INVALID_ARG;
 
-    uint32_t period = freq_to_period_ticks(freq_hz);
+    const pwm_band_t *band = pick_band(freq_hz);
+    if (!band) return ESP_ERR_INVALID_ARG;
+
+    uint32_t period = freq_to_period_ticks(band->resolution_hz, freq_hz);
     if (period < 2 || period > 65535) return ESP_ERR_INVALID_ARG;
 
     uint32_t compare = (uint32_t)lroundf((duty_pct / 100.0f) * (float)period);
     if (compare > period) compare = period;
 
-    esp_err_t err = mcpwm_timer_set_period(s_pwm.timer, period);
-    if (err != ESP_OK) return err;
-    err = mcpwm_comparator_set_compare_value(s_pwm.cmpr, compare);
-    if (err != ESP_OK) return err;
+    if (band->resolution_hz == s_pwm.resolution_hz) {
+        // Same band → glitch-free TEZ-latched update.
+        esp_err_t err = mcpwm_timer_set_period(s_pwm.timer, period);
+        if (err != ESP_OK) return err;
+        err = mcpwm_comparator_set_compare_value(s_pwm.cmpr, compare);
+        if (err != ESP_OK) return err;
+    } else {
+        // Band crossing → teardown-reconfigure-restart (brief output glitch).
+        esp_err_t err = reconfigure_for_band(band, period, compare);
+        if (err != ESP_OK) return err;
+    }
 
-    s_pwm.period_ticks = period;
-    s_pwm.freq_hz      = freq_hz;
-    s_pwm.duty_pct     = duty_pct;
+    s_pwm.period_ticks  = period;
+    s_pwm.freq_hz       = freq_hz;
+    s_pwm.duty_pct      = duty_pct;
+    s_pwm.resolution_hz = band->resolution_hz;
 
-    // Trigger pulse: hold for one period + a small margin so the scope latches it.
-    // The new settings are already latched at the next TEZ; a short software pulse
-    // here is the "settings changed" edge the user's system can observe.
-    int64_t pulse_us = 2 + (1000000 / (int64_t)freq_hz);
+    // Trigger pulse: a software "settings changed" edge for scope latching.
+    // 1 Hz gives 1000 µs; 1 MHz gives 200 µs — both cleanly observable.
+    int64_t pulse_us = 2 + 1000000 / (int64_t)freq_hz;
     if (pulse_us > 1000) pulse_us = 1000;
+    if (pulse_us <  200) pulse_us =  200;
     gpio_set_level(s_pwm.trigger_gpio, 1);
     esp_rom_delay_us((uint32_t)pulse_us);
     gpio_set_level(s_pwm.trigger_gpio, 0);
