@@ -22,14 +22,20 @@ static EventGroupHandle_t s_ev;
 
 static char s_last_ip[16] = {0};
 
+// True only while on_credentials is blocked inside its 20 s wait. Keeps
+// the STA_DISCONNECTED event from latching EV_STA_FAIL during steady
+// state (post-provision AP drops, DHCP renews, etc.) where we want the
+// driver to auto-reconnect silently.
+static volatile bool s_in_captive_wait;
+
 static void on_wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
-        // Only signal failure when captive portal is waiting; for post-
-        // provision steady state we want auto-reconnect behaviour.
-        xEventGroupSetBits(s_ev, EV_STA_FAIL);
+        if (s_in_captive_wait) {
+            xEventGroupSetBits(s_ev, EV_STA_FAIL);
+        }
         esp_wifi_connect();
     } else if (base == IP_EVENT && id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *evt = (ip_event_got_ip_t *)data;
@@ -63,10 +69,12 @@ static esp_err_t on_credentials(const char *ssid, const char *password,
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &sta));
 
     xEventGroupClearBits(s_ev, EV_GOT_IP | EV_STA_FAIL);
+    s_in_captive_wait = true;
     esp_wifi_connect();
 
     EventBits_t bits = xEventGroupWaitBits(s_ev, EV_GOT_IP | EV_STA_FAIL,
                                            pdTRUE, pdFALSE, pdMS_TO_TICKS(20000));
+    s_in_captive_wait = false;
     if (bits & EV_GOT_IP) {
         // snprintf instead of strncpy so gcc -Wstringop-truncation stays
         // happy; out->ip is zero-init'd by the caller.
@@ -92,6 +100,10 @@ static void ap_teardown_task(void *arg)
     ESP_LOGI(TAG, "tearing down AP + DNS hijack");
     dns_hijack_stop();
     captive_portal_stop();
+    // Polite deauth-broadcast before dropping the AP so any phones still
+    // associated (e.g. user lingered on /success past the 30 s) see a
+    // clean disconnect instead of a silent dangling association.
+    esp_wifi_deauth_sta(0);
     esp_wifi_set_mode(WIFI_MODE_STA);
     mdns_svc_start();
     vTaskDelete(NULL);
