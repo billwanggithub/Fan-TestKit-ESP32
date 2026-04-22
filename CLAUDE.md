@@ -276,8 +276,10 @@ Step 0 要改寫成「先確認 non-secure build 全功能驗證過，再單 fea
   拔掉，cJSON 改 component manager 上 `espressif/cjson`（直接 depend，
   不是 transitive）。`net_dashboard/CMakeLists.txt` 的 REQUIRES 寫
   `espressif__cjson`。
-- **`espressif/mdns ^1.4.0`** — mDNS hostname `esp32-pwm.local` 廣告
-  用。`net_dashboard/CMakeLists.txt` 的 REQUIRES 寫 `mdns`。
+- **`espressif/mdns ^1.8.0`** — mDNS hostname `esp32-pwm.local` 廣告
+  用。v6.0 把 built-in `mdns` component 拔掉搬到 component manager，
+  所以 `net_dashboard/CMakeLists.txt` 的 REQUIRES 要用 namespaced name
+  `espressif__mdns`（不是 v5.x 的 `mdns`）。
 
 Wi-Fi provisioning 現在走 SoftAP + captive portal，不再依賴 BLE 或
 任何外部 provisioning component — 板子第一次 boot 沒有 creds 時會開
