@@ -35,9 +35,20 @@ Hardware validation on 2026-04-22 (Samsung phone, One UI):
   one malformed HTTP probe (~15 s after DHCP) and gives up silently.
   Suspected cause: Samsung OneUI / carrier policy disables HTTP probe
   fallback and uses HTTPS-only detection.
-- Samsung phone, manual flow: works — join AP, open browser, navigate
-  to anything (DNS hijack redirects to `192.168.4.1`), setup page loads,
-  submit credentials, success page renders, done.
+- Samsung phone, manual flow: works **only when user types the raw IP
+  `http://192.168.4.1/`**. Typing a domain name (`http://example.com`,
+  `http://google.com`, etc.) fails — Chrome / Samsung Internet now
+  default to HTTPS-First and silently upgrade `http://` to `https://`;
+  our captive portal doesn't listen on 443, so the TLS handshake fails
+  and the browser shows "This site can't be reached" with no fallback
+  to HTTP 80. IP literals (`192.168.4.1`) are exempt from HTTPS-First
+  since Chrome knows IPs can't have valid certs, so that path stays
+  reliable. DNS hijack itself is fine — confirmed 2026-04-23 by logging
+  every query in `dns_hijack.c`; phone issues the `example.com` query,
+  we answer `192.168.4.1`, phone then tries TLS to `:443` and gives up.
+  The first 2026-04-22 validation note that said "browser, navigate to
+  anything" was only accurate against the Chrome version installed
+  then; current Chrome / One UI Internet breaks it.
 
 Open items:
 

@@ -19,7 +19,7 @@
 1. 板子通電 → 會開一個 open AP "Fan-TestKit-setup"
        │
        ▼
-2. 手機連上那個 AP → browser 打開任何 URL → 自動跳到 setup page
+2. 手機連上那個 AP → browser 打 http://192.168.4.1/ → setup page
        │  填 home Wi-Fi SSID + password → Connect
        ▼
 3. Success page 會顯示 raw IP (例如 http://192.168.1.47/)
@@ -67,16 +67,24 @@
 會跳) 會出現「登入此 Wi-Fi 網路 / Sign in to Wi-Fi network」的
 notification，點它就直接進 setup page。
 
-**(b) 沒跳、或者 Samsung One UI 的手機 (常見情況)** — 這種就手動進：
-打開 Chrome 或任何 browser，在網址列**隨便打一個 URL**
-(例如 `http://example.com` 或 `http://google.com` 都可以)，device 的
-DNS hijack 會把你 redirect 到 setup page。
+**(b) 沒跳、或者 Samsung One UI 的手機 (常見情況)** — 手動進。
+打開 Chrome 或任何 browser，**在網址列打 `http://192.168.4.1/` 按
+Enter**（前面的 `http://` 要打），setup page 就會直接出現。
 
-> **Why 需要手動？** Samsung 的 One UI 跟部分電信商 ROM 把 HTTP
-> captive-portal probe 關掉了 (改成 HTTPS-only detection)，所以手機
-> 的「Sign in to Wi-Fi network」notification 不會跳。這**沒有辦法
-> 在 firmware 端修**，只能叫 user 手動打 URL。細節見 `HANDOFF.md`
-> 的 Samsung 段。
+> **不要打 `example.com` / `google.com` 這種 domain name！** 現在的
+> Chrome / Samsung Internet 預設對所有 `http://` URL 自動升級成
+> `https://`（"Always use secure connections" 功能），而我們 captive
+> portal 只在 port 80 serve HTTP，沒 listen 443。DNS hijack 回的
+> 192.168.4.1 是對的，但 phone 之後會嘗試 TLS handshake，撞到空的
+> 443 port → 顯示「This site can't be reached」或白畫面。
+>
+> **Raw IP `http://192.168.4.1/` 不會被升級** — Chrome 知道 IP literal
+> 不可能有 valid cert，所以 HTTPS-First 對 IP 不適用，直接走 HTTP。
+>
+> **Why captive portal 自動跳不出來？** Samsung 的 One UI 跟部分電信
+> 商 ROM 把 HTTP captive-portal probe 關掉了 (改成 HTTPS-only
+> detection)，所以「Sign in to Wi-Fi network」notification 不會跳。
+> 這**沒有辦法在 firmware 端修**。細節見 `HANDOFF.md` 的 Samsung 段。
 
 ### 2.3 填 home Wi-Fi credentials
 
@@ -186,9 +194,19 @@ RTS=1」的工具 (例如 串口調試助手) 或用 `idf.py -p COMn monitor --n
 ### 手機連 `Fan-TestKit-setup` 之後 browser 沒自動跳
 
 Samsung 跟某些電信 ROM 的已知限制 (上面 Step 2.2 有解釋)。
-**Workaround**：手動打開 browser，網址列隨便打一個 `http://` 開頭的
-URL (`http://example.com` 都可以)，DNS hijack 會把你 redirect 到
-setup page。**不要打 `https://`** — TLS 沒辦法 hijack，會直接 error。
+**Workaround**：手動打開 browser，網址列打 `http://192.168.4.1/`
+按 Enter，setup page 直接出現。
+
+**不要打 `http://example.com` / `http://google.com` 這種 domain**
+— Chrome / Samsung Internet 會自動升級成 `https://`，而我們 captive
+portal 沒 listen 443，結果就是「This site can't be reached」。Raw IP
+（`http://192.168.4.1/`）是 HTTPS-First 的 exception，Chrome 不會
+對 IP literal 做升級，一定通。
+
+如果你不小心打了 domain 卡住了，也可以去 Chrome → Settings →
+Privacy and security → Security → 關掉「Always use secure
+connections」，然後所有 `http://` URL 都能走我們的 DNS hijack。但打
+raw IP 比較快。
 
 ### Setup page 的 SSID dropdown 卡在「Scanning...」
 

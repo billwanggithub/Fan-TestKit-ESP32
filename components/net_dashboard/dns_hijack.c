@@ -48,9 +48,31 @@ static int question_end_offset(const uint8_t *buf, int len)
     return off <= len ? off : -1;
 }
 
+// Decode the first question's QNAME into dotted form (e.g. "example.com").
+// Wire format: length-prefixed labels terminated by a zero-length label.
+// Bails on compression pointers (shouldn't appear in client queries) or
+// label-length overruns; truncates to fit the output buffer.
+static void decode_qname(const uint8_t *buf, int qend, char *out, size_t out_sz)
+{
+    int off = 12;
+    size_t w = 0;
+    while (off < qend - 4 && buf[off] && w + 2 < out_sz) {
+        int l = buf[off++];
+        if ((l & 0xC0) || off + l > qend - 4) break;
+        if (w) out[w++] = '.';
+        size_t copy = (size_t)l;
+        if (w + copy >= out_sz - 1) copy = out_sz - 1 - w;
+        memcpy(out + w, buf + off, copy);
+        w += copy;
+        off += l;
+    }
+    out[w] = '\0';
+}
+
 static void dns_task(void *arg)
 {
     uint8_t buf[512];
+    char    qname[128];
     struct sockaddr_in peer;
     socklen_t peer_len;
 
@@ -62,6 +84,22 @@ static void dns_task(void *arg)
 
         int qend = question_end_offset(buf, n);
         if (qend < 0 || qend + 16 > (int)sizeof(buf)) continue;
+
+        // Per-query log kept at DEBUG: a phone idling on the AP spams
+        // 40+ queries per 15 s (every background app resolves something),
+        // which drowns the log at INFO. Enable on demand with
+        //   esp_log_level_set("dns_hijack", ESP_LOG_DEBUG);
+        // to verify the phone is actually asking our DNS server (vs
+        // Android Private DNS / DoH bypass). Gated at runtime so we skip
+        // the QNAME decode entirely when the log level masks it.
+        if (esp_log_level_get(TAG) >= ESP_LOG_DEBUG) {
+            decode_qname(buf, qend, qname, sizeof(qname));
+            uint32_t a = peer.sin_addr.s_addr;
+            ESP_LOGD(TAG, "query from %d.%d.%d.%d: %s",
+                     (int)(a & 0xff), (int)((a >> 8) & 0xff),
+                     (int)((a >> 16) & 0xff), (int)((a >> 24) & 0xff),
+                     qname[0] ? qname : "(empty)");
+        }
 
         // Flip flags: QR=1 response, Opcode=query (leave), RA=1, RCODE=0.
         buf[2] = 0x80 | (buf[2] & 0x01);     // QR=1, OPCODE=0, AA=0, TC=0, RD=copy-from-query
