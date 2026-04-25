@@ -10,6 +10,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 
 static const char *TAG = "psu_modbus";
 
@@ -51,6 +52,7 @@ static const struct { uint16_t id; const char *name; float i_scale; } RD_MODELS[
 #define RD_MODELS_N (sizeof(RD_MODELS) / sizeof(RD_MODELS[0]))
 
 static TaskHandle_t s_psu_task;
+static SemaphoreHandle_t s_uart_mutex;
 
 static inline void store_f(_Atomic uint32_t *slot, float v)
 {
@@ -167,35 +169,46 @@ static void save_slave_addr_to_nvs(uint8_t v)
 static esp_err_t psu_txn(const uint8_t *req, size_t req_len,
                          uint8_t *resp, size_t expect_len)
 {
-    uart_flush_input(PSU_UART_PORT);
+    if (xSemaphoreTake(s_uart_mutex, pdMS_TO_TICKS(PSU_TXN_TIMEOUT_MS + 50)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
 
+    uart_flush_input(PSU_UART_PORT);
     int written = uart_write_bytes(PSU_UART_PORT, (const char *)req, req_len);
-    if (written != (int)req_len) return ESP_ERR_INVALID_STATE;
+    esp_err_t result;
+    if (written != (int)req_len) {
+        result = ESP_ERR_INVALID_STATE;
+        goto out;
+    }
     esp_err_t e = uart_wait_tx_done(PSU_UART_PORT, pdMS_TO_TICKS(50));
-    if (e != ESP_OK) return e;
+    if (e != ESP_OK) { result = e; goto out; }
 
     int got = uart_read_bytes(PSU_UART_PORT, resp, expect_len,
                               pdMS_TO_TICKS(PSU_TXN_TIMEOUT_MS));
-    // Inter-frame gap before the next transaction.
     vTaskDelay(pdMS_TO_TICKS(PSU_INTERFRAME_MS));
 
-    if (got <= 0) return ESP_ERR_TIMEOUT;
+    if (got <= 0) { result = ESP_ERR_TIMEOUT; goto out; }
     if ((size_t)got < expect_len) {
-        // Could be exception response: 5 bytes [slave][fc|0x80][exc][crc][crc]
         if (got >= 5 && (resp[1] & 0x80)) {
             if (verify_crc(resp, 5)) {
                 ESP_LOGW(TAG, "modbus exception: fc=0x%02X exc=0x%02X",
                          resp[1] & 0x7F, resp[2]);
-                return ESP_ERR_INVALID_RESPONSE;
+                result = ESP_ERR_INVALID_RESPONSE;
+                goto out;
             }
         }
-        return ESP_ERR_TIMEOUT;
+        result = ESP_ERR_TIMEOUT;
+        goto out;
     }
-    if (!verify_crc(resp, expect_len)) return ESP_ERR_INVALID_CRC;
-    if (resp[0] != req[0])             return ESP_ERR_INVALID_RESPONSE;   // wrong slave echo
-    if ((resp[1] & 0x7F) != (req[1] & 0x7F)) return ESP_ERR_INVALID_RESPONSE;
-    if (resp[1] & 0x80)                return ESP_ERR_INVALID_RESPONSE;   // exception
-    return ESP_OK;
+    if (!verify_crc(resp, expect_len))            { result = ESP_ERR_INVALID_CRC;      goto out; }
+    if (resp[0] != req[0])                        { result = ESP_ERR_INVALID_RESPONSE; goto out; }
+    if ((resp[1] & 0x7F) != (req[1] & 0x7F))      { result = ESP_ERR_INVALID_RESPONSE; goto out; }
+    if (resp[1] & 0x80)                           { result = ESP_ERR_INVALID_RESPONSE; goto out; }
+    result = ESP_OK;
+
+out:
+    xSemaphoreGive(s_uart_mutex);
+    return result;
 }
 
 static esp_err_t psu_read_holding(uint16_t addr, uint16_t n, uint16_t *out_regs)
@@ -339,6 +352,9 @@ esp_err_t psu_modbus_init(void)
              CONFIG_APP_PSU_UART_TX_GPIO, CONFIG_APP_PSU_UART_RX_GPIO,
              CONFIG_APP_PSU_UART_BAUD,
              atomic_load_explicit(&s_slave_addr, memory_order_relaxed));
+
+    s_uart_mutex = xSemaphoreCreateMutex();
+    if (!s_uart_mutex) return ESP_ERR_NO_MEM;
     return ESP_OK;
 }
 esp_err_t psu_modbus_start(void)
@@ -347,9 +363,50 @@ esp_err_t psu_modbus_start(void)
     BaseType_t ok = xTaskCreate(psu_task_fn, "psu_modbus", 4096, NULL, 4, &s_psu_task);
     return ok == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
-esp_err_t psu_modbus_set_voltage(float v)  { (void)v; return ESP_OK; }
-esp_err_t psu_modbus_set_current(float i)  { (void)i; return ESP_OK; }
-esp_err_t psu_modbus_set_output(bool on)   { (void)on; return ESP_OK; }
+esp_err_t psu_modbus_set_voltage(float v)
+{
+    if (v < 0.0f)  v = 0.0f;
+    if (v > 60.0f) v = 60.0f;
+    uint16_t raw = (uint16_t)(v * 100.0f + 0.5f);
+    esp_err_t e = psu_write_single(REG_V_SET, raw);
+    note_txn_result(e);
+    if (e == ESP_OK) {
+        store_f(&s_v_set_bits, raw / 100.0f);
+    } else {
+        ESP_LOGW(TAG, "set_voltage(%.2f V) failed: %s", (double)v, esp_err_to_name(e));
+    }
+    return e;
+}
+
+esp_err_t psu_modbus_set_current(float i)
+{
+    if (i < 0.0f) i = 0.0f;
+    float i_div = load_f(&s_i_scale_bits);
+    if (i_div < 1.0f) i_div = 1000.0f;   // before model detect
+    float i_max = (i_div >= 999.0f) ? 6.0f : 24.0f;   // RD6006: 6 A; RD6012/18/24: ≤24 A
+    if (i > i_max) i = i_max;
+    uint16_t raw = (uint16_t)(i * i_div + 0.5f);
+    esp_err_t e = psu_write_single(REG_I_SET, raw);
+    note_txn_result(e);
+    if (e == ESP_OK) {
+        store_f(&s_i_set_bits, raw / i_div);
+    } else {
+        ESP_LOGW(TAG, "set_current(%.3f A) failed: %s", (double)i, esp_err_to_name(e));
+    }
+    return e;
+}
+
+esp_err_t psu_modbus_set_output(bool on)
+{
+    esp_err_t e = psu_write_single(REG_OUTPUT, on ? 1 : 0);
+    note_txn_result(e);
+    if (e == ESP_OK) {
+        atomic_store_explicit(&s_output_on, on ? 1 : 0, memory_order_relaxed);
+    } else {
+        ESP_LOGW(TAG, "set_output(%d) failed: %s", on ? 1 : 0, esp_err_to_name(e));
+    }
+    return e;
+}
 uint8_t psu_modbus_get_slave_addr(void)
 {
     return atomic_load_explicit(&s_slave_addr, memory_order_relaxed);
