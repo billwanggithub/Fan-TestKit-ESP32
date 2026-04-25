@@ -417,28 +417,28 @@ void psu_modbus_get_telemetry(psu_modbus_telemetry_t *out)
 const char *psu_modbus_get_model_name(void) { return "unknown"; }
 ```
 
-- [ ] **Step 2: CRC-16 sanity check (compile-time vector)**
+- [ ] **Step 2: ~~CRC-16 sanity check~~ — SKIPPED (see post-mortem)**
 
-The Modbus FAQ canonical request `[01][03][00][08][00][05]` has CRC `0x0944` → wire bytes `44 09`. Add this static_assert at the bottom of the file (after all functions) so the next build proves CRC-16 is correct:
+> **History:** the original plan added a `__attribute__((constructor))`
+> self-check that compared `modbus_crc16({01 03 00 08 00 05})` against
+> `0x0944` and called `__builtin_trap()` on mismatch. The compared-against
+> constant turned out to be wrong (taken from a stray spec note rather
+> than actually computed), so on real hardware the trap fired every cold
+> boot and the chip never reached `app_main`. The check was reverted in
+> commit `32e3706`. **Do not add it back** unless you have:
+>
+> 1. A canonical CRC vector verified against either an authoritative
+>    reference implementation or live RD60xx wire traffic.
+> 2. Some way to surface the failure other than a silent trap —
+>    constructors run before `ESP_LOG` is up, so a debug-hostile silent
+>    halt is the only signal you'll get.
+>
+> CRC correctness is verified end-to-end at runtime instead: a bad
+> implementation makes every transaction time out, `link_ok` flips to
+> false within ~1 s, the dashboard shows "PSU offline". Skip this step
+> entirely.
 
-```c
-// Compile-time CRC sanity. {01 03 00 08 00 05} → CRC 0x0944. modbus_crc16 isn't
-// constexpr in C99, so we use a runtime _Static_assert via a one-shot init
-// pattern: drop the check into a __attribute__((constructor)) instead.
-__attribute__((constructor))
-static void modbus_crc16_self_check(void)
-{
-    static const uint8_t v[6] = {0x01, 0x03, 0x00, 0x08, 0x00, 0x05};
-    uint16_t got = modbus_crc16(v, 6);
-    if (got != 0x0944) {
-        // Cannot ESP_LOGE before logging is up; leave a marker the JTAG
-        // backtrace will catch by halting on a known invalid op.
-        __builtin_trap();
-    }
-}
-```
-
-- [ ] **Step 3: Build to verify the helpers compile and the constructor runs without trapping**
+- [ ] **Step 3: Build to verify the helpers compile (no trap to run yet)**
 
 ```bash
 idf.py build

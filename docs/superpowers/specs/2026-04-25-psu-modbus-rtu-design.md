@@ -120,6 +120,19 @@ slave  → master: [slave][fc][bytecount][...data...][lo(crc)][hi(crc)]    (FC=0
 
 CRC-16 polynomial 0xA001, init 0xFFFF (Modbus standard).
 
+**No boot-time CRC self-check.** A first-pass implementation added a
+`__attribute__((constructor))` that compared the CRC of a fixed vector
+against a hand-coded constant and called `__builtin_trap()` on mismatch.
+The constant turned out to be wrong, so the trap fired every cold boot
+and the chip looped before `app_main` ran. Reverted in commit `32e3706`.
+CRC correctness is now verified at runtime: a wrong CRC produces frames
+the supply ignores, transactions time out, `link_ok` flips false within
+~1 s, and the dashboard immediately shows "PSU offline". That feedback
+loop is the test. Don't reintroduce a constructor-time trap unless the
+canonical vector is verified against a reference implementation or live
+RD60xx traffic, AND the failure path produces a visible signal beyond a
+silent halt (constructors run before `ESP_LOG` is available).
+
 ### 4.4 Riden RD60xx register map
 
 Source: Ruideng's Modbus protocol document; cross-checked against the
@@ -454,8 +467,12 @@ EDIT  CLAUDE.md                                (UART pin reservation note)
 ## 12. Testing strategy
 
 1. **Component-level unit reasoning** (no test harness on this project — same
-   as gpio_io shipped). Code-review the CRC-16 against a known-good vector
-   (request `01 03 00 08 00 05 [crc]` → CRC = `04 09`).
+   as gpio_io shipped). CRC-16 verified end-to-end by the link-health path:
+   a wrong implementation produces frames the supply ignores → all
+   transactions time out → `link_ok=false` within 1 s → dashboard shows
+   "PSU offline". (An earlier plan suggested a fixed-vector compile-time
+   check; the hand-coded constant was wrong and bricked boot, so it was
+   removed in commit `32e3706`.)
 
 2. **Hardware-in-the-loop** with a real RD6006:
    - Flash, watch CDC log for "psu_modbus: detected RD6006 (model 60062)".

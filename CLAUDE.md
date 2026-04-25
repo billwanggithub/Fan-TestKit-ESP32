@@ -433,10 +433,17 @@ V_OUT=0x0A, I_OUT=0x0B, OUTPUT=0x12; MODEL=0x00 for boot detect). Adding
 another component-manager pin alongside `esp_tinyusb` / `mdns` / `cjson`
 would exceed the LoC saved.
 
-CRC-16 (poly 0xA001, init 0xFFFF) self-checks at boot via a
-`__attribute__((constructor))` against the canonical Modbus FAQ vector
-`{01 03 00 08 00 05} → 0x0944`; mismatch triggers `__builtin_trap()`
-before app_main runs.
+CRC-16 uses poly `0xA001`, init `0xFFFF`, shift-right-after-XOR. There is
+deliberately **no boot-time self-check**: an earlier
+`__attribute__((constructor))` compared against `0x0944` and trapped on
+mismatch, but that constant was wrong — every cold boot trapped before
+`app_main` ran, putting the chip in a reset loop. CRC correctness is
+verified end-to-end instead: a bad implementation produces frames the
+supply rejects, every transaction times out, and `link_ok` stays false →
+the dashboard immediately shows "PSU offline". Don't reintroduce the
+boot-time check unless you have a verified canonical CRC vector AND log
+output before the trap (constructors run before `ESP_LOG` is up, so a
+silent trap is the only failure mode — debug-hostile by construction).
 
 UART access is funnelled through a single mutex (`s_uart_mutex`) so
 setpoint writes from `control_task` (priority 6) and the polling loop on
