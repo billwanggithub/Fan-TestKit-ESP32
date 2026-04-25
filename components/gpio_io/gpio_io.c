@@ -81,6 +81,15 @@ static esp_err_t apply_mode_to_hw(uint8_t idx, gpio_io_mode_t mode)
     return gpio_config(&cfg);
 }
 
+static int power_pin_level_for(bool on)
+{
+#if CONFIG_APP_POWER_SWITCH_ACTIVE_LOW
+    return on ? 0 : 1;
+#else
+    return on ? 1 : 0;
+#endif
+}
+
 // ---- input poll task (20 Hz) -----------------------------------------------
 
 static void gpio_io_poll_task(void *arg)
@@ -157,6 +166,24 @@ esp_err_t gpio_io_init(void)
                               memory_order_relaxed);
     }
 
+    {
+        gpio_config_t cfg = {
+            .pin_bit_mask = 1ULL << CONFIG_APP_POWER_SWITCH_GPIO,
+            .mode         = GPIO_MODE_OUTPUT,
+            .pull_up_en   = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type    = GPIO_INTR_DISABLE,
+        };
+        esp_err_t e = gpio_config(&cfg);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "power switch gpio_config(gpio %d) failed: %s",
+                     CONFIG_APP_POWER_SWITCH_GPIO, esp_err_to_name(e));
+            return e;
+        }
+        gpio_set_level(CONFIG_APP_POWER_SWITCH_GPIO, power_pin_level_for(false));
+        atomic_store_explicit(&s_power, 0, memory_order_relaxed);
+    }
+
     BaseType_t ok = xTaskCreate(gpio_io_poll_task, "gpio_io_poll", 2048, NULL, 2, NULL);
     if (ok != pdPASS) {
         ESP_LOGE(TAG, "poll task create failed");
@@ -195,10 +222,9 @@ esp_err_t gpio_io_set_pulse_width_ms(uint32_t width_ms)
     return ESP_OK;
 }
 
-// remaining stubs (set_power/get_power) stay until Task 8 fills them
-// in. Single-writer invariant: every gpio_io_set_* and gpio_io_pulse
-// call is funnelled through control_task, so loads of s_state[] in
-// this file see no concurrent writers. Pulse end-callback only writes
+// Single-writer invariant: every gpio_io_set_* and gpio_io_pulse call
+// is funnelled through control_task, so loads of s_state[] in this
+// file see no concurrent writers. Pulse end-callback only writes
 // OUTPUT-mode pins (which the poll task skips) so no collision there.
 esp_err_t gpio_io_set_mode(uint8_t idx, gpio_io_mode_t mode)
 {
@@ -282,5 +308,15 @@ esp_err_t gpio_io_pulse(uint8_t idx, uint32_t width_ms)
     }
     return ESP_OK;
 }
-esp_err_t gpio_io_set_power(bool on)                            { (void)on; return ESP_ERR_NOT_SUPPORTED; }
-bool      gpio_io_get_power(void)                               { return false; }
+esp_err_t gpio_io_set_power(bool on)
+{
+    gpio_set_level(CONFIG_APP_POWER_SWITCH_GPIO, power_pin_level_for(on));
+    atomic_store_explicit(&s_power, on ? 1 : 0, memory_order_relaxed);
+    ESP_LOGI(TAG, "power switch %s", on ? "ON" : "OFF");
+    return ESP_OK;
+}
+
+bool gpio_io_get_power(void)
+{
+    return atomic_load_explicit(&s_power, memory_order_relaxed) != 0;
+}
