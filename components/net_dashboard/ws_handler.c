@@ -10,6 +10,7 @@
 #include "freertos/task.h"
 
 #include "app_api.h"
+#include "gpio_io.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "net_dashboard.h"
@@ -74,6 +75,62 @@ static void handle_json(cJSON *root, int fd)
             };
             control_task_post(&c2, 0);
         }
+    } else if (strcmp(type_j->valuestring, "set_gpio_mode") == 0) {
+        const cJSON *idx  = cJSON_GetObjectItem(root, "idx");
+        const cJSON *mode = cJSON_GetObjectItem(root, "mode");
+        if (!cJSON_IsNumber(idx) || !cJSON_IsString(mode)) return;
+        const char *m = mode->valuestring;
+        uint8_t mv;
+        if      (strcmp(m, "input_pulldown") == 0) mv = 0;
+        else if (strcmp(m, "input_pullup")   == 0) mv = 1;
+        else if (strcmp(m, "input_floating") == 0) mv = 2;
+        else if (strcmp(m, "output")         == 0) mv = 3;
+        else return;
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_GPIO_SET_MODE,
+            .gpio_set_mode = { .idx = (uint8_t)idx->valuedouble, .mode = mv },
+        };
+        control_task_post(&c, 0);
+    } else if (strcmp(type_j->valuestring, "set_gpio_level") == 0) {
+        const cJSON *idx   = cJSON_GetObjectItem(root, "idx");
+        const cJSON *level = cJSON_GetObjectItem(root, "level");
+        if (!cJSON_IsNumber(idx) || !cJSON_IsNumber(level)) return;
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_GPIO_SET_LEVEL,
+            .gpio_set_level = {
+                .idx   = (uint8_t)idx->valuedouble,
+                .level = (level->valuedouble != 0) ? 1u : 0u,
+            },
+        };
+        control_task_post(&c, 0);
+    } else if (strcmp(type_j->valuestring, "pulse_gpio") == 0) {
+        const cJSON *idx = cJSON_GetObjectItem(root, "idx");
+        const cJSON *w   = cJSON_GetObjectItem(root, "width_ms");
+        if (!cJSON_IsNumber(idx)) return;
+        uint32_t width = cJSON_IsNumber(w) ? (uint32_t)w->valuedouble
+                                           : gpio_io_get_pulse_width_ms();
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_GPIO_PULSE,
+            .gpio_pulse = { .idx = (uint8_t)idx->valuedouble, .width_ms = width },
+        };
+        control_task_post(&c, 0);
+    } else if (strcmp(type_j->valuestring, "set_power") == 0) {
+        const cJSON *on = cJSON_GetObjectItem(root, "on");
+        if (!cJSON_IsBool(on) && !cJSON_IsNumber(on)) return;
+        bool b = cJSON_IsBool(on) ? cJSON_IsTrue(on) : (on->valuedouble != 0);
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_POWER_SET,
+            .power_set = { .on = b ? 1u : 0u },
+        };
+        control_task_post(&c, 0);
+    } else if (strcmp(type_j->valuestring, "set_pulse_width") == 0) {
+        const cJSON *w = cJSON_GetObjectItem(root, "width_ms");
+        if (!cJSON_IsNumber(w)) return;
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_PULSE_WIDTH_SET,
+            .pulse_width_set = { .width_ms = (uint32_t)w->valuedouble },
+        };
+        control_task_post(&c, 0);
     } else if (strcmp(type_j->valuestring, "factory_reset") == 0) {
         ESP_LOGW(TAG, "factory_reset requested via ws fd=%d", fd);
         ws_send_json_to(fd, "{\"type\":\"ack\",\"op\":\"factory_reset\"}");
@@ -114,6 +171,8 @@ static void telemetry_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(50);  // 20 Hz to the browser
+    char payload[768];
+    static const char *mode_short[] = { "i_pd", "i_pu", "i_fl", "o" };
     while (true) {
         vTaskDelayUntil(&last, period);
         if (!s_httpd_for_telemetry) continue;
@@ -121,11 +180,30 @@ static void telemetry_task(void *arg)
         uint32_t f; float d;
         control_task_get_pwm(&f, &d);
         float rpm = rpm_cap_get_latest();
-        char payload[160];
+        gpio_io_state_t st[GPIO_IO_PIN_COUNT];
+        gpio_io_get_all(st);
+        bool power = gpio_io_get_power();
+        uint32_t pw = gpio_io_get_pulse_width_ms();
+
         int64_t ts = (int64_t)xTaskGetTickCount() * portTICK_PERIOD_MS;
-        snprintf(payload, sizeof(payload),
-                 "{\"type\":\"status\",\"freq\":%lu,\"duty\":%.2f,\"rpm\":%.2f,\"ts\":%" PRId64 "}",
-                 (unsigned long)f, d, rpm, ts);
+
+        int n = snprintf(payload, sizeof(payload),
+                "{\"type\":\"status\",\"freq\":%lu,\"duty\":%.2f,\"rpm\":%.2f,\"ts\":%" PRId64
+                ",\"power\":%d,\"pulse_width_ms\":%lu,\"gpio\":[",
+                (unsigned long)f, d, rpm, ts, power ? 1 : 0, (unsigned long)pw);
+
+        for (int i = 0; i < GPIO_IO_PIN_COUNT && n < (int)sizeof(payload); i++) {
+            n += snprintf(payload + n, sizeof(payload) - n,
+                          "%s{\"m\":\"%s\",\"v\":%d,\"p\":%d}",
+                          (i == 0) ? "" : ",",
+                          mode_short[st[i].mode],
+                          st[i].level ? 1 : 0,
+                          st[i].pulsing ? 1 : 0);
+        }
+        if (n < (int)sizeof(payload)) {
+            n += snprintf(payload + n, sizeof(payload) - n, "]}");
+        }
+
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (s_client_fds[i] != 0) ws_send_json_to(s_client_fds[i], payload);
         }

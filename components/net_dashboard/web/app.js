@@ -56,6 +56,28 @@
       factory_acked: 'Device acknowledged — rebooting…',
       ota_accepted: 'OTA accepted; device will reboot.',
       ota_failed: 'OTA failed: ',
+      power_switch: 'Power Switch',
+      power_state: 'State',
+      power_on: 'ON',
+      power_off: 'OFF',
+      gpio: 'GPIO',
+      group_a: 'Group A',
+      group_b: 'Group B',
+      gpio_input_pulldown: 'input + pull-down',
+      gpio_input_pullup: 'input + pull-up',
+      gpio_input_floating: 'input + floating',
+      gpio_output: 'output',
+      gpio_pulse_btn: 'Pulse',
+      gpio_pulsing: 'Pulsing…',
+      gpio_value_label: 'value:',
+      gpio_output_section: 'GPIO output',
+      pulse_width_label: 'Pulse width (ms)',
+      apply_pulse_width: 'Apply',
+      help_pin_power: 'Power-switch:',
+      help_pin_group_a: 'GPIO Group A:',
+      help_pin_group_b: 'GPIO Group B:',
+      help_gpio_h: 'GPIO & Power',
+      help_gpio_p: 'Group A defaults to input (pull-down) and Group B defaults to output (low). Each pin can be flipped between input and output at runtime; outputs support level toggle and a one-shot pulse of configurable width. Power switch toggles a GPIO whose polarity (active-high / active-low) is set at build time via Kconfig.',
     },
     'zh-Hant': {
       app_title: 'Fan-TestKit 儀表板',
@@ -107,6 +129,28 @@
       factory_acked: '裝置已確認 — 重開機中…',
       ota_accepted: 'OTA 已接受；裝置即將重開機。',
       ota_failed: 'OTA 失敗：',
+      power_switch: '電源開關',
+      power_state: '狀態',
+      power_on: '開',
+      power_off: '關',
+      gpio: 'GPIO',
+      group_a: 'A 組',
+      group_b: 'B 組',
+      gpio_input_pulldown: '輸入 + 下拉',
+      gpio_input_pullup: '輸入 + 上拉',
+      gpio_input_floating: '輸入 + 浮接',
+      gpio_output: '輸出',
+      gpio_pulse_btn: '脈衝',
+      gpio_pulsing: '脈衝中…',
+      gpio_value_label: '值：',
+      gpio_output_section: 'GPIO 輸出',
+      pulse_width_label: '脈衝寬度 (ms)',
+      apply_pulse_width: '套用',
+      help_pin_power: '電源開關：',
+      help_pin_group_a: 'GPIO A 組：',
+      help_pin_group_b: 'GPIO B 組：',
+      help_gpio_h: 'GPIO 與電源',
+      help_gpio_p: 'A 組預設為輸入（下拉），B 組預設為輸出（低）。每隻 pin 可在執行時切換輸入 / 輸出；輸出模式支援切換準位以及單發脈衝（脈衝寬度可設）。電源開關控制一隻 GPIO，其 active-high / active-low 由 Kconfig 編譯時決定。',
     },
     'zh-Hans': {
       app_title: 'Fan-TestKit 仪表板',
@@ -158,6 +202,28 @@
       factory_acked: '设备已确认 — 重启中…',
       ota_accepted: 'OTA 已接受；设备即将重启。',
       ota_failed: 'OTA 失败：',
+      power_switch: '电源开关',
+      power_state: '状态',
+      power_on: '开',
+      power_off: '关',
+      gpio: 'GPIO',
+      group_a: 'A 组',
+      group_b: 'B 组',
+      gpio_input_pulldown: '输入 + 下拉',
+      gpio_input_pullup: '输入 + 上拉',
+      gpio_input_floating: '输入 + 浮接',
+      gpio_output: '输出',
+      gpio_pulse_btn: '脉冲',
+      gpio_pulsing: '脉冲中…',
+      gpio_value_label: '值：',
+      gpio_output_section: 'GPIO 输出',
+      pulse_width_label: '脉冲宽度 (ms)',
+      apply_pulse_width: '应用',
+      help_pin_power: '电源开关：',
+      help_pin_group_a: 'GPIO A 组：',
+      help_pin_group_b: 'GPIO B 组：',
+      help_gpio_h: 'GPIO 与电源',
+      help_gpio_p: 'A 组默认为输入（下拉），B 组默认为输出（低）。每个 pin 可在运行时切换输入 / 输出；输出模式支持切换电平以及单发脉冲（脉冲宽度可设）。电源开关控制一个 GPIO，其 active-high / active-low 由 Kconfig 编译时决定。',
     },
   };
 
@@ -207,6 +273,13 @@
         const v = info.pins ? info.pins[el.dataset.pin] : undefined;
         el.textContent = (v ?? '?').toString();
       });
+      // group A / B pin lists rendered as comma-separated
+      document.querySelectorAll('[data-pin-list]').forEach(el => {
+        const arr = info.pins ? info.pins[el.dataset.pinList] : null;
+        el.textContent = Array.isArray(arr) ? arr.map(n => `GPIO${n}`).join(', ') : '?';
+      });
+      // build GPIO rows (need group_a / group_b pin numbers from device_info)
+      if (info.pins) buildGpioRows(info.pins.group_a || [], info.pins.group_b || []);
       deviceInfoMap = { freq_min: info.freq_hz_min, freq_max: info.freq_hz_max };
       document.querySelectorAll('[data-info]').forEach(el => {
         const v = deviceInfoMap[el.dataset.info];
@@ -561,6 +634,147 @@
     },
   });
 
+  // ---------- GPIO panel ----------
+  const MODE_LABELS = ['gpio_input_pulldown','gpio_input_pullup','gpio_input_floating','gpio_output'];
+  const MODE_SHORT_TO_INT = { i_pd:0, i_pu:1, i_fl:2, o:3 };
+  const MODE_INT_TO_WIRE = ['input_pulldown','input_pullup','input_floating','output'];
+
+  function buildGpioRows(groupAPins, groupBPins) {
+    const groupARoot = document.getElementById('gpio-group-a');
+    const groupBRoot = document.getElementById('gpio-group-b');
+    if (!groupARoot || !groupBRoot) return;
+    [...groupAPins, ...groupBPins].forEach((gpioNum, idx) => {
+      const grp = idx < groupAPins.length ? 'A' : 'B';
+      const slot = idx < groupAPins.length ? (idx + 1) : (idx - groupAPins.length + 1);
+      const row = document.createElement('div');
+      row.className = 'gpio-row';
+      row.dataset.idx = String(idx);
+      row.innerHTML = `
+        <span class="gpio-name">${grp}${slot}</span>
+        <span class="gpio-pinnum">GPIO${gpioNum}</span>
+        <select class="gpio-mode">
+          <option value="input_pulldown" data-i18n="gpio_input_pulldown">input + pull-down</option>
+          <option value="input_pullup"   data-i18n="gpio_input_pullup">input + pull-up</option>
+          <option value="input_floating" data-i18n="gpio_input_floating">input + floating</option>
+          <option value="output"         data-i18n="gpio_output">output</option>
+        </select>
+        <span class="gpio-tail">
+          <span class="gpio-input-tail">
+            <span data-i18n="gpio_value_label">value:</span>
+            <span class="gpio-value">0</span>
+          </span>
+          <span class="gpio-output-tail" hidden>
+            <label class="gpio-toggle">
+              <input type="checkbox" class="gpio-level" />
+              <span class="gpio-level-text">0</span>
+            </label>
+            <button type="button" class="gpio-pulse" data-i18n="gpio_pulse_btn">Pulse</button>
+          </span>
+        </span>
+      `;
+      (idx < groupAPins.length ? groupARoot : groupBRoot).appendChild(row);
+
+      const modeSel = row.querySelector('.gpio-mode');
+      modeSel.addEventListener('change', () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'set_gpio_mode', idx, mode: modeSel.value }));
+        }
+      });
+
+      const levelEl = row.querySelector('.gpio-level');
+      levelEl.addEventListener('change', () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'set_gpio_level', idx, level: levelEl.checked ? 1 : 0 }));
+        }
+      });
+
+      const pulseBtn = row.querySelector('.gpio-pulse');
+      pulseBtn.addEventListener('click', () => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'pulse_gpio', idx }));
+        }
+      });
+    });
+    // Re-apply current language to the freshly-rendered rows.
+    const sel = document.getElementById('lang-select');
+    if (sel) applyLang(sel.value);
+  }
+
+  function setGpioFromDevice(arr) {
+    if (!Array.isArray(arr)) return;
+    arr.forEach((entry, idx) => {
+      const row = document.querySelector(`.gpio-row[data-idx="${idx}"]`);
+      if (!row) return;
+      const modeInt = MODE_SHORT_TO_INT[entry.m];
+      if (modeInt === undefined) return;
+      const wireMode = MODE_INT_TO_WIRE[modeInt];
+      const modeSel = row.querySelector('.gpio-mode');
+      // Don't fight a focused mode dropdown.
+      if (document.activeElement !== modeSel && modeSel.value !== wireMode) {
+        modeSel.value = wireMode;
+      }
+      const isOutput = (modeInt === 3);
+      row.querySelector('.gpio-input-tail').hidden = isOutput;
+      row.querySelector('.gpio-output-tail').hidden = !isOutput;
+      row.querySelector('.gpio-value').textContent = entry.v ? '1' : '0';
+      const levelEl = row.querySelector('.gpio-level');
+      const levelTxt = row.querySelector('.gpio-level-text');
+      if (document.activeElement !== levelEl) levelEl.checked = !!entry.v;
+      levelTxt.textContent = entry.v ? '1' : '0';
+      const pulsing = !!entry.p;
+      row.classList.toggle('pulsing', pulsing);
+      const pulseBtn = row.querySelector('.gpio-pulse');
+      pulseBtn.disabled = pulsing;
+      levelEl.disabled  = pulsing;
+      modeSel.disabled  = pulsing;
+      pulseBtn.textContent = pulsing ? t('gpio_pulsing') : t('gpio_pulse_btn');
+    });
+  }
+
+  // ---------- Power switch ----------
+  const powerBtn = document.getElementById('power_btn');
+  function setPowerFromDevice(on) {
+    if (!powerBtn) return;
+    powerBtn.dataset.on = on ? '1' : '0';
+    powerBtn.classList.toggle('on', !!on);
+    const txtEl = powerBtn.querySelector('.txt');
+    if (txtEl) txtEl.textContent = on ? t('power_on') : t('power_off');
+  }
+  if (powerBtn) {
+    powerBtn.addEventListener('click', () => {
+      const want = powerBtn.dataset.on === '1' ? 0 : 1;
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set_power', on: want === 1 }));
+      }
+    });
+  }
+
+  // ---------- Pulse-width settings ----------
+  const pulseWidthEl = document.getElementById('pulse-width-ms');
+  function setPulseWidthFromDevice(ms) {
+    if (!pulseWidthEl) return;
+    // Same focus-protection pattern the freq/duty readouts use: only the
+    // currently-typing user gets to keep their value; otherwise mirror the
+    // device. This means a CLI/HID/CDC change to pulse_width_ms is reflected
+    // here on the next telemetry tick.
+    if (document.activeElement === pulseWidthEl) return;
+    if (pulseWidthEl.value !== String(ms)) pulseWidthEl.value = String(ms);
+  }
+  const applyPulseBtn = document.getElementById('apply_pulse_width');
+  if (applyPulseBtn) {
+    applyPulseBtn.addEventListener('click', () => {
+      if (!pulseWidthEl) return;
+      const n = parseInt(pulseWidthEl.value, 10);
+      if (!isFinite(n) || n < 1 || n > 10000) {
+        pulseWidthEl.value = '100';
+        return;
+      }
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'set_pulse_width', width_ms: n }));
+      }
+    });
+  }
+
   // ---------- WebSocket dispatch ----------
   ws.addEventListener('message', (ev) => {
     try {
@@ -572,6 +786,9 @@
         if (typeof msg.freq === 'number') freqPanel.setFromDevice(msg.freq);
         if (typeof msg.duty === 'number') dutyPanel.setFromDevice(msg.duty);
         if (typeof msg.rpm === 'number') setRpmFromDevice(msg.rpm);
+        if (Array.isArray(msg.gpio)) setGpioFromDevice(msg.gpio);
+        if (typeof msg.power === 'number') setPowerFromDevice(msg.power);
+        if (typeof msg.pulse_width_ms === 'number') setPulseWidthFromDevice(msg.pulse_width_ms);
       } else if (msg.type === 'ack' && msg.op === 'factory_reset') {
         const fs = document.getElementById('factory_reset_status');
         if (fs) fs.textContent = t('factory_acked');

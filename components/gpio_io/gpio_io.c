@@ -1,0 +1,350 @@
+#include "gpio_io.h"
+
+#include <stdatomic.h>
+#include <string.h>
+
+#include "esp_log.h"
+#include "esp_timer.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+
+#include "sdkconfig.h"
+
+static const char *TAG = "gpio_io";
+
+// ---- pin map (Kconfig-resolved) --------------------------------------------
+
+static const int s_pins[GPIO_IO_PIN_COUNT] = {
+    CONFIG_APP_GPIO_GROUP_A_PIN_0, CONFIG_APP_GPIO_GROUP_A_PIN_1,
+    CONFIG_APP_GPIO_GROUP_A_PIN_2, CONFIG_APP_GPIO_GROUP_A_PIN_3,
+    CONFIG_APP_GPIO_GROUP_A_PIN_4, CONFIG_APP_GPIO_GROUP_A_PIN_5,
+    CONFIG_APP_GPIO_GROUP_A_PIN_6, CONFIG_APP_GPIO_GROUP_A_PIN_7,
+    CONFIG_APP_GPIO_GROUP_B_PIN_0, CONFIG_APP_GPIO_GROUP_B_PIN_1,
+    CONFIG_APP_GPIO_GROUP_B_PIN_2, CONFIG_APP_GPIO_GROUP_B_PIN_3,
+    CONFIG_APP_GPIO_GROUP_B_PIN_4, CONFIG_APP_GPIO_GROUP_B_PIN_5,
+    CONFIG_APP_GPIO_GROUP_B_PIN_6, CONFIG_APP_GPIO_GROUP_B_PIN_7,
+};
+
+// State word per pin (4 bits used, 4 reserved).
+//   bits 0-1: mode (gpio_io_mode_t)
+//   bit  2:   level
+//   bit  3:   pulsing
+static _Atomic uint8_t s_state[GPIO_IO_PIN_COUNT];
+
+#define STATE_MODE(s)     ((gpio_io_mode_t)((s) & 0x03))
+#define STATE_LEVEL(s)    (((s) >> 2) & 0x01)
+#define STATE_PULSING(s)  (((s) >> 3) & 0x01)
+#define MAKE_STATE(m,l,p) ((uint8_t)(((m) & 0x03) | (((l) & 0x01) << 2) | (((p) & 0x01) << 3)))
+
+static _Atomic uint8_t  s_power;
+static _Atomic uint32_t s_pulse_width_ms;
+
+// Per-pin one-shot timer handles; created lazily on first pulse.
+static esp_timer_handle_t s_pulse_timer[GPIO_IO_PIN_COUNT];
+
+// ---- NVS persistence (pulse width only) -----------------------------------
+
+#define NVS_NAMESPACE  "gpio_io"
+#define NVS_KEY_PULSE  "pulse_ms"
+
+static void load_pulse_width_from_nvs(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    uint32_t v = 0;
+    if (nvs_get_u32(h, NVS_KEY_PULSE, &v) == ESP_OK && v >= 1 && v <= 10000) {
+        atomic_store_explicit(&s_pulse_width_ms, v, memory_order_relaxed);
+        ESP_LOGI(TAG, "pulse width loaded from NVS: %lu ms", (unsigned long)v);
+    }
+    nvs_close(h);
+}
+
+static void save_pulse_width_to_nvs(uint32_t v)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, NVS_KEY_PULSE, v);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+// ---- helpers ---------------------------------------------------------------
+
+static esp_err_t apply_mode_to_hw(uint8_t idx, gpio_io_mode_t mode)
+{
+    int pin = s_pins[idx];
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << pin,
+        .intr_type    = GPIO_INTR_DISABLE,
+    };
+    switch (mode) {
+    case GPIO_IO_MODE_INPUT_PULLDOWN:
+        cfg.mode = GPIO_MODE_INPUT;
+        cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_ENABLE;
+        break;
+    case GPIO_IO_MODE_INPUT_PULLUP:
+        cfg.mode = GPIO_MODE_INPUT;
+        cfg.pull_up_en = GPIO_PULLUP_ENABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        break;
+    case GPIO_IO_MODE_INPUT_FLOATING:
+        cfg.mode = GPIO_MODE_INPUT;
+        cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        break;
+    case GPIO_IO_MODE_OUTPUT:
+        cfg.mode = GPIO_MODE_OUTPUT;
+        cfg.pull_up_en = GPIO_PULLUP_DISABLE;
+        cfg.pull_down_en = GPIO_PULLDOWN_DISABLE;
+        break;
+    default:
+        return ESP_ERR_INVALID_ARG;
+    }
+    return gpio_config(&cfg);
+}
+
+static int power_pin_level_for(bool on)
+{
+#if CONFIG_APP_POWER_SWITCH_ACTIVE_LOW
+    return on ? 0 : 1;
+#else
+    return on ? 1 : 0;
+#endif
+}
+
+// ---- input poll task (20 Hz) -----------------------------------------------
+
+static void gpio_io_poll_task(void *arg)
+{
+    (void)arg;
+    const TickType_t period = pdMS_TO_TICKS(50);   // 20 Hz
+    TickType_t last = xTaskGetTickCount();
+    while (true) {
+        vTaskDelayUntil(&last, period);
+        for (int i = 0; i < GPIO_IO_PIN_COUNT; i++) {
+            uint8_t s = atomic_load_explicit(&s_state[i], memory_order_relaxed);
+            gpio_io_mode_t m = STATE_MODE(s);
+            if (m == GPIO_IO_MODE_OUTPUT) continue;
+            int level = gpio_get_level(s_pins[i]);
+            uint8_t ns = MAKE_STATE(m, level, STATE_PULSING(s));
+            if (ns == s) continue;
+            // CAS guards the cross-core race: control_task on core 0 may flip
+            // the pin to OUTPUT (or pulse end-callback may clear pulsing)
+            // between the load above and this store. If the word changed, drop
+            // this sample — the next tick re-evaluates from fresh state.
+            uint8_t expected = s;
+            (void)atomic_compare_exchange_strong_explicit(
+                &s_state[i], &expected, ns,
+                memory_order_relaxed, memory_order_relaxed);
+        }
+    }
+}
+
+// ---- pulse end-callback ----------------------------------------------------
+
+// Runs on the esp_timer task. The pulse-arm path stores level=idle into the
+// state word *before* arming the timer, so this callback only needs to drive
+// the pin back to the published level and clear the pulsing bit. Single
+// concurrent writer to s_state[idx] vs. the poll task — but the poll task
+// skips OUTPUT pins, so no collision.
+static void pulse_done_cb(void *arg)
+{
+    uintptr_t idx_u = (uintptr_t)arg;
+    uint8_t idx = (uint8_t)idx_u;
+    if (idx >= GPIO_IO_PIN_COUNT) return;
+
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_MODE(s) != GPIO_IO_MODE_OUTPUT) return;
+
+    bool restore = STATE_LEVEL(s);
+    gpio_set_level(s_pins[idx], restore ? 1 : 0);
+    atomic_store_explicit(&s_state[idx],
+                          MAKE_STATE(GPIO_IO_MODE_OUTPUT, restore ? 1 : 0, 0),
+                          memory_order_relaxed);
+}
+
+// ---- public API ------------------------------------------------------------
+
+esp_err_t gpio_io_init(void)
+{
+    atomic_store_explicit(&s_pulse_width_ms,
+                          CONFIG_APP_DEFAULT_PULSE_WIDTH_MS,
+                          memory_order_relaxed);
+    load_pulse_width_from_nvs();
+    atomic_store_explicit(&s_power, 0, memory_order_relaxed);
+
+    for (int i = 0; i < GPIO_IO_PIN_COUNT; i++) {
+        gpio_io_mode_t m = (i < 8) ? GPIO_IO_MODE_INPUT_PULLDOWN
+                                   : GPIO_IO_MODE_OUTPUT;
+        esp_err_t e = apply_mode_to_hw(i, m);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "gpio_config(idx %d, gpio %d) failed: %s",
+                     i, s_pins[i], esp_err_to_name(e));
+            return e;
+        }
+        if (m == GPIO_IO_MODE_OUTPUT) {
+            gpio_set_level(s_pins[i], 0);
+        }
+        atomic_store_explicit(&s_state[i], MAKE_STATE(m, 0, 0),
+                              memory_order_relaxed);
+    }
+
+    {
+        gpio_config_t cfg = {
+            .pin_bit_mask = 1ULL << CONFIG_APP_POWER_SWITCH_GPIO,
+            .mode         = GPIO_MODE_OUTPUT,
+            .pull_up_en   = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type    = GPIO_INTR_DISABLE,
+        };
+        esp_err_t e = gpio_config(&cfg);
+        if (e != ESP_OK) {
+            ESP_LOGE(TAG, "power switch gpio_config(gpio %d) failed: %s",
+                     CONFIG_APP_POWER_SWITCH_GPIO, esp_err_to_name(e));
+            return e;
+        }
+        gpio_set_level(CONFIG_APP_POWER_SWITCH_GPIO, power_pin_level_for(false));
+        atomic_store_explicit(&s_power, 0, memory_order_relaxed);
+    }
+
+    BaseType_t ok = xTaskCreate(gpio_io_poll_task, "gpio_io_poll", 2048, NULL, 2, NULL);
+    if (ok != pdPASS) {
+        ESP_LOGE(TAG, "poll task create failed");
+        return ESP_ERR_NO_MEM;
+    }
+
+    ESP_LOGI(TAG, "gpio_io ready: 8 inputs (pull-down), 8 outputs (low)");
+    return ESP_OK;
+}
+
+void gpio_io_get_state(uint8_t idx, gpio_io_state_t *out)
+{
+    if (!out || idx >= GPIO_IO_PIN_COUNT) return;
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    out->mode    = STATE_MODE(s);
+    out->level   = STATE_LEVEL(s);
+    out->pulsing = STATE_PULSING(s);
+}
+
+void gpio_io_get_all(gpio_io_state_t out[GPIO_IO_PIN_COUNT])
+{
+    if (!out) return;
+    for (int i = 0; i < GPIO_IO_PIN_COUNT; i++) gpio_io_get_state(i, &out[i]);
+}
+
+uint32_t gpio_io_get_pulse_width_ms(void)
+{
+    return atomic_load_explicit(&s_pulse_width_ms, memory_order_relaxed);
+}
+
+esp_err_t gpio_io_set_pulse_width_ms(uint32_t width_ms)
+{
+    if (width_ms < 1)     width_ms = 1;
+    if (width_ms > 10000) width_ms = 10000;
+    atomic_store_explicit(&s_pulse_width_ms, width_ms, memory_order_relaxed);
+    save_pulse_width_to_nvs(width_ms);
+    return ESP_OK;
+}
+
+// Single-writer invariant: every gpio_io_set_* and gpio_io_pulse call
+// is funnelled through control_task, so loads of s_state[] in this
+// file see no concurrent writers. Pulse end-callback only writes
+// OUTPUT-mode pins (which the poll task skips) so no collision there.
+esp_err_t gpio_io_set_mode(uint8_t idx, gpio_io_mode_t mode)
+{
+    if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
+    if (mode > GPIO_IO_MODE_OUTPUT) return ESP_ERR_INVALID_ARG;
+
+    // Reject mode change while a pulse is in flight on this pin.
+    uint8_t cur = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_PULSING(cur)) return ESP_ERR_INVALID_STATE;
+
+    esp_err_t e = apply_mode_to_hw(idx, mode);
+    if (e != ESP_OK) return e;
+
+    bool level = 0;
+    if (mode == GPIO_IO_MODE_OUTPUT) {
+        // Preserve the previously driven level if we were already output;
+        // otherwise default to 0.
+        level = (STATE_MODE(cur) == GPIO_IO_MODE_OUTPUT) ? STATE_LEVEL(cur) : 0;
+        gpio_set_level(s_pins[idx], level);
+    }
+    atomic_store_explicit(&s_state[idx], MAKE_STATE(mode, level, 0),
+                          memory_order_relaxed);
+    return ESP_OK;
+}
+esp_err_t gpio_io_set_level(uint8_t idx, bool level)
+{
+    if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_MODE(s) != GPIO_IO_MODE_OUTPUT) return ESP_ERR_INVALID_STATE;
+    if (STATE_PULSING(s))                     return ESP_ERR_INVALID_STATE;
+
+    gpio_set_level(s_pins[idx], level ? 1 : 0);
+    atomic_store_explicit(&s_state[idx],
+                          MAKE_STATE(GPIO_IO_MODE_OUTPUT, level ? 1 : 0, 0),
+                          memory_order_relaxed);
+    return ESP_OK;
+}
+esp_err_t gpio_io_pulse(uint8_t idx, uint32_t width_ms)
+{
+    if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
+
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_MODE(s) != GPIO_IO_MODE_OUTPUT) return ESP_ERR_INVALID_STATE;
+    if (STATE_PULSING(s))                     return ESP_ERR_INVALID_STATE;
+
+    if (width_ms < 1)     width_ms = 1;
+    if (width_ms > 10000) width_ms = 10000;
+
+    if (!s_pulse_timer[idx]) {
+        const esp_timer_create_args_t args = {
+            .callback        = pulse_done_cb,
+            .arg             = (void *)(uintptr_t)idx,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name            = "gpio_io_pulse",
+        };
+        esp_err_t ce = esp_timer_create(&args, &s_pulse_timer[idx]);
+        if (ce != ESP_OK) return ce;
+    }
+
+    bool idle  = STATE_LEVEL(s);
+    bool burst = !idle;
+    gpio_set_level(s_pins[idx], burst ? 1 : 0);
+    // Mark pulsing BEFORE arming the timer so the callback can never see
+    // pulsing=false (which would short-circuit the restore). Note that the
+    // *level* bit we publish is the idle level, not the burst level —
+    // pulse_done_cb reads STATE_LEVEL to know what to restore to.
+    atomic_store_explicit(&s_state[idx],
+                          MAKE_STATE(GPIO_IO_MODE_OUTPUT, idle ? 1 : 0, 1),
+                          memory_order_relaxed);
+
+    esp_err_t te = esp_timer_start_once(s_pulse_timer[idx], (uint64_t)width_ms * 1000);
+    if (te != ESP_OK) {
+        // Synchronous restore on the failure path so the pin is never left
+        // mid-pulse. Caller sees the error; next telemetry frame shows
+        // pulsing=false.
+        gpio_set_level(s_pins[idx], idle ? 1 : 0);
+        atomic_store_explicit(&s_state[idx],
+                              MAKE_STATE(GPIO_IO_MODE_OUTPUT, idle ? 1 : 0, 0),
+                              memory_order_relaxed);
+        return te;
+    }
+    return ESP_OK;
+}
+esp_err_t gpio_io_set_power(bool on)
+{
+    gpio_set_level(CONFIG_APP_POWER_SWITCH_GPIO, power_pin_level_for(on));
+    atomic_store_explicit(&s_power, on ? 1 : 0, memory_order_relaxed);
+    ESP_LOGI(TAG, "power switch %s", on ? "ON" : "OFF");
+    return ESP_OK;
+}
+
+bool gpio_io_get_power(void)
+{
+    return atomic_load_explicit(&s_power, memory_order_relaxed) != 0;
+}

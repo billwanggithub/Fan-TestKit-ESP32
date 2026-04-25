@@ -78,6 +78,24 @@ typedef struct __attribute__((packed)) {
     uint8_t  error;
 } usb_cdc_ota_status_t;
 
+// ---- GPIO IO + power switch (HID) ------------------------------------------
+
+#define USB_HID_REPORT_GPIO          0x04   // OUT, 4 B (op, b1, b2, b3)
+
+// op codes inside report 0x04 payload byte 0
+#define USB_HID_GPIO_OP_SET_MODE     0x01   // payload: idx, mode, _
+#define USB_HID_GPIO_OP_SET_LEVEL    0x02   // payload: idx, level, _
+#define USB_HID_GPIO_OP_PULSE        0x03   // payload: idx, width_lo, width_hi
+#define USB_HID_GPIO_OP_POWER        0x04   // payload: on, _, _
+
+// ---- GPIO IO + power switch (CDC SLIP) -------------------------------------
+
+#define USB_CDC_OP_GPIO_SET_MODE     0x30   // payload: idx, mode
+#define USB_CDC_OP_GPIO_SET_LEVEL    0x31   // payload: idx, level
+#define USB_CDC_OP_GPIO_PULSE        0x32   // payload: idx, width_lo, width_hi
+#define USB_CDC_OP_POWER             0x33   // payload: on
+#define USB_CDC_OP_PULSE_WIDTH_SET   0x34   // payload: width_lo, width_hi
+
 #ifdef __cplusplus
 }
 #endif

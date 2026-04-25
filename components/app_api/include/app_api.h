@@ -20,14 +20,24 @@ typedef enum {
     CTRL_CMD_OTA_BEGIN,
     CTRL_CMD_OTA_CHUNK,
     CTRL_CMD_OTA_END,
+    CTRL_CMD_GPIO_SET_MODE,
+    CTRL_CMD_GPIO_SET_LEVEL,
+    CTRL_CMD_GPIO_PULSE,
+    CTRL_CMD_POWER_SET,
+    CTRL_CMD_PULSE_WIDTH_SET,
 } ctrl_cmd_kind_t;
 
 typedef struct {
     ctrl_cmd_kind_t kind;
     union {
-        struct { uint32_t freq_hz; float duty_pct; } set_pwm;
-        struct { uint8_t pole; uint16_t mavg; }     set_rpm_params;
-        struct { uint32_t timeout_us; }             set_rpm_timeout;
+        struct { uint32_t freq_hz; float duty_pct; }   set_pwm;
+        struct { uint8_t pole; uint16_t mavg; }        set_rpm_params;
+        struct { uint32_t timeout_us; }                set_rpm_timeout;
+        struct { uint8_t  idx; uint8_t  mode; }        gpio_set_mode;
+        struct { uint8_t  idx; uint8_t  level; }       gpio_set_level;
+        struct { uint8_t  idx; uint32_t width_ms; }    gpio_pulse;
+        struct { uint8_t  on; }                        power_set;
+        struct { uint32_t width_ms; }                  pulse_width_set;
     };
 } ctrl_cmd_t;
 
