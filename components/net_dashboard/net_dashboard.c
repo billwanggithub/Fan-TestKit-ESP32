@@ -8,6 +8,9 @@
 #include "freertos/task.h"
 #include "ota_core.h"
 #include "prov_internal.h"
+#include "cJSON.h"
+#include "pwm_gen.h"
+#include "sdkconfig.h"
 
 esp_err_t provisioning_run_and_connect(void);
 void      ws_register(httpd_handle_t server);
@@ -46,6 +49,44 @@ static esp_err_t js_get(httpd_req_t *req)
 static esp_err_t css_get(httpd_req_t *req)
 { return serve_embedded(req, "text/css", app_css_start, app_css_end); }
 
+// One-shot static device config for the dashboard's Help panel. Returned as
+// JSON. Fields are compile-time constants (Kconfig + pwm_gen header), so the
+// handler is allocation-bounded and never blocks.
+static esp_err_t device_info_get(httpd_req_t *req)
+{
+    cJSON *root = cJSON_CreateObject();
+    if (!root) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_OK;
+    }
+
+    cJSON *pins = cJSON_AddObjectToObject(root, "pins");
+    cJSON_AddNumberToObject(pins, "pwm",        CONFIG_APP_PWM_OUTPUT_GPIO);
+    cJSON_AddNumberToObject(pins, "trigger",    CONFIG_APP_PWM_TRIGGER_GPIO);
+    cJSON_AddNumberToObject(pins, "rpm",        CONFIG_APP_RPM_INPUT_GPIO);
+    cJSON_AddNumberToObject(pins, "status_led", CONFIG_APP_STATUS_LED_GPIO);
+
+    cJSON *defaults = cJSON_AddObjectToObject(root, "defaults");
+    cJSON_AddNumberToObject(defaults, "pole_count",     CONFIG_APP_DEFAULT_POLE_COUNT);
+    cJSON_AddNumberToObject(defaults, "mavg_count",     CONFIG_APP_DEFAULT_MAVG_COUNT);
+    cJSON_AddNumberToObject(defaults, "rpm_timeout_us", CONFIG_APP_DEFAULT_RPM_TIMEOUT_US);
+
+    cJSON_AddNumberToObject(root, "freq_hz_min", PWM_GEN_FREQ_MIN_HZ);
+    cJSON_AddNumberToObject(root, "freq_hz_max", PWM_GEN_FREQ_MAX_HZ);
+
+    char *body = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!body) {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "render");
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    esp_err_t e = httpd_resp_sendstr(req, body);
+    cJSON_free(body);
+    return e;
+}
+
 static esp_err_t ota_post(httpd_req_t *req)
 {
     esp_err_t e = ota_core_begin((uint32_t)req->content_len);
@@ -73,7 +114,7 @@ static esp_err_t ota_post(httpd_req_t *req)
 static httpd_handle_t start_http(void)
 {
     httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
-    cfg.max_uri_handlers = 8;
+    cfg.max_uri_handlers = 9;  // root, js, css, ota, device_info, ws, +headroom
     cfg.close_fn = ws_on_client_closed;
     httpd_handle_t server = NULL;
     ESP_ERROR_CHECK(httpd_start(&server, &cfg));
@@ -82,10 +123,12 @@ static httpd_handle_t start_http(void)
     httpd_uri_t js   = { .uri = "/app.js",  .method = HTTP_GET,  .handler = js_get   };
     httpd_uri_t css  = { .uri = "/app.css", .method = HTTP_GET,  .handler = css_get  };
     httpd_uri_t ota  = { .uri = "/ota",     .method = HTTP_POST, .handler = ota_post };
+    httpd_uri_t info = { .uri = "/api/device_info", .method = HTTP_GET, .handler = device_info_get };
     httpd_register_uri_handler(server, &root);
     httpd_register_uri_handler(server, &js);
     httpd_register_uri_handler(server, &css);
     httpd_register_uri_handler(server, &ota);
+    httpd_register_uri_handler(server, &info);
     ws_register(server);
     return server;
 }
