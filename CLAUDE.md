@@ -129,6 +129,24 @@ Frontends translate protocol only. Core logic is written once. A third
 transport (e.g. Ethernet) should plug in as a new frontend feeding the same
 `ctrl_cmd_queue` / `ota_core_*` APIs — never duplicate the business logic.
 
+**Boot defaults go through the queue too.** `app_main` posts
+`CTRL_CMD_SET_PWM(10000, 0)` after `control_task_start()` so the boot
+default takes the same `pwm_gen_set → publish_pwm` path every later
+command uses. Hardware, the published atomics in control_task, and
+downstream consumers (telemetry @ 20 Hz, HID status frames) all reflect
+the same value from boot. Don't seed the atomics directly from
+`pwm_gen_get()` — that bypasses the single path and lets the hardware
+drift from the published state. Symptom if violated: the dashboard's
+first telemetry frame carries `freq=0`, the JS picks it up, and a
+duty-only commit before any freq change ships `{freq:0, duty:X}` →
+`pwm_gen_set` rejects with `ESP_ERR_INVALID_ARG`.
+
+**Dashboard mirrors the same invariant.** `app.js` has no `lastSent`
+cache for freq/duty — each panel's `onCommit` reads the *other* axis from
+that panel's `getValue()` at commit time, and `setFromDevice` keeps
+`panel.current` locked to telemetry. Don't reintroduce a parallel cache
+("just to avoid one extra read") — it WILL desync.
+
 ### 2. Components never depend on `main`
 
 ESP-IDF's `main` component cannot be a `REQUIRES` dependency. Shared types
