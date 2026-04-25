@@ -7,37 +7,55 @@
   <link rel="stylesheet" href="/app.css" />
 </head>
 <body>
-  <h1>Fan-TestKit Dashboard</h1>
+  <div class="topbar">
+    <h1 data-i18n="app_title">Fan-TestKit Dashboard</h1>
+    <label class="lang-switch">
+      <span class="visually-hidden" data-i18n="language">Language</span>
+      <select id="lang-select">
+        <option value="en">English</option>
+        <option value="zh-Hant">繁體中文</option>
+        <option value="zh-Hans">简体中文</option>
+      </select>
+    </label>
+  </div>
 
   <!-- ============== Settings panel (RPM tunables + slider step sizes) ============== -->
   <details class="panel settings-panel" id="settings">
-    <summary>Settings</summary>
+    <summary data-i18n="settings">Settings</summary>
 
     <div class="settings-section">
-      <h3>RPM</h3>
+      <h3 data-i18n="rpm">RPM</h3>
       <div class="settings-grid">
-        <label for="pole">Pole pairs</label>
-        <input id="pole" type="number" min="1" value="2" />
+        <label for="pole" data-i18n="pole_count">Pole count</label>
+        <select id="pole">
+          <option value="2">2</option>
+          <option value="4">4</option>
+          <option value="6">6</option>
+          <option value="8">8</option>
+          <option value="10">10</option>
+          <option value="12">12</option>
+          <option value="14">14</option>
+        </select>
 
-        <label for="mavg">Avg window</label>
-        <input id="mavg" type="number" min="1" value="16" />
+        <label for="mavg" data-i18n="avg_window">Avg window</label>
+        <input id="mavg" type="number" min="1" value="1" />
 
-        <label for="timeout_us">Timeout (µs)</label>
+        <label for="timeout_us" data-i18n="timeout_us">Timeout (µs)</label>
         <input id="timeout_us" type="number" min="1000" value="1000000" />
       </div>
-      <button id="apply_rpm" class="btn-primary">Apply RPM</button>
+      <button id="apply_rpm" class="btn-primary" data-i18n="apply_rpm">Apply RPM</button>
     </div>
 
     <div class="settings-section">
-      <h3>Step sizes</h3>
+      <h3 data-i18n="step_sizes">Step sizes</h3>
       <div class="settings-grid">
-        <label for="duty-step">Duty step (%)</label>
+        <label for="duty-step" data-i18n="duty_step">Duty step (%)</label>
         <input id="duty-step" type="number" step="0.1" min="0.1" value="1.0" />
 
-        <label for="freq-step">Frequency step (Hz)</label>
+        <label for="freq-step" data-i18n="freq_step">Frequency step (Hz)</label>
         <input id="freq-step" type="number" step="1" min="1" value="10" />
       </div>
-      <p class="settings-hint">Step sizes apply immediately to the slider step on the Duty / Frequency panels.</p>
+      <p class="settings-hint" data-i18n="step_hint">Step sizes apply immediately to the slider step on the Duty / Frequency panels.</p>
     </div>
   </details>
 
@@ -49,12 +67,12 @@
       <span class="spacer"></span>
       <label class="live-toggle">
         <input id="rpm-live" type="checkbox" checked />
-        <span>Live</span>
+        <span data-i18n="live">Live</span>
       </label>
     </div>
 
     <details id="rpm-chart-expander">
-      <summary>Chart</summary>
+      <summary data-i18n="chart">Chart</summary>
       <div class="chart-row">
         <div class="yaxis-col">
           <div class="y-label">RPM</div>
@@ -74,7 +92,7 @@
             <span>−5s</span>
             <span>now</span>
           </div>
-          <div class="x-label">time</div>
+          <div class="x-label" data-i18n="time">time</div>
         </div>
       </div>
     </details>
@@ -83,7 +101,7 @@
   <!-- ============== Duty panel ============== -->
   <section class="panel pwm-panel" id="duty-panel">
     <div class="row">
-      <span class="label">Duty</span>
+      <span class="label" data-i18n="duty">Duty</span>
       <input class="readout-input" id="duty-readout" type="number" step="0.1" min="0" max="100" value="0" />
       <span class="unit">%</span>
     </div>
@@ -93,7 +111,7 @@
     <div class="ticks"><span>0%</span><span>50%</span><span>100%</span></div>
 
     <details open>
-      <summary>Fine</summary>
+      <summary data-i18n="fine">Fine</summary>
       <div class="grid-finetune" id="duty-finetune">
         <button class="pos" data-delta="0.1">+0.1</button>
         <button class="pos" data-delta="1">+1</button>
@@ -105,7 +123,7 @@
     </details>
 
     <details open>
-      <summary>Presets</summary>
+      <summary data-i18n="presets">Presets</summary>
       <div class="preset-grid" id="duty-presets"></div>
     </details>
   </section>
@@ -113,7 +131,7 @@
   <!-- ============== Frequency panel ============== -->
   <section class="panel pwm-panel" id="freq-panel">
     <div class="row">
-      <span class="label">Frequency</span>
+      <span class="label" data-i18n="frequency">Frequency</span>
       <input class="readout-input" id="freq-readout" type="number" step="1" min="10" max="1000000" value="1000" />
       <span class="unit">Hz</span>
     </div>
@@ -123,10 +141,10 @@
     <div class="ticks">
       <span>10</span><span>100</span><span>1k</span><span>10k</span><span>100k</span><span>1M</span>
     </div>
-    <div class="resbits">duty resolution at this freq: <span id="freq-resbits">—</span> bits</div>
+    <div class="resbits"><span data-i18n="duty_res_label">duty resolution at this freq:</span> <span id="freq-resbits">—</span> <span data-i18n="bits">bits</span></div>
 
     <details>
-      <summary>Fine</summary>
+      <summary data-i18n="fine">Fine</summary>
       <div class="grid-finetune" id="freq-finetune">
         <button class="pos" data-delta="1">+1</button>
         <button class="pos" data-delta="10">+10</button>
@@ -138,73 +156,74 @@
     </details>
 
     <details>
-      <summary>Presets</summary>
+      <summary data-i18n="presets">Presets</summary>
       <div class="preset-grid" id="freq-presets"></div>
     </details>
   </section>
 
   <!-- ============== OTA panel ============== -->
   <section class="panel">
-    <h2>Firmware Update</h2>
+    <h2 data-i18n="firmware_update">Firmware Update</h2>
     <div class="ota-controls">
       <input id="fwfile" type="file" accept=".bin" />
-      <button id="upload" class="btn-primary">Upload &amp; reboot</button>
+      <button id="upload" class="btn-primary" data-i18n="upload_reboot">Upload &amp; reboot</button>
     </div>
     <progress id="otaprog" max="100" value="0"></progress>
   </section>
 
   <!-- ============== Factory reset panel ============== -->
   <section class="panel">
-    <h2>Factory Reset</h2>
-    <p class="warn">
+    <h2 data-i18n="factory_reset">Factory Reset</h2>
+    <p class="warn" data-i18n="factory_reset_warn">
       Clears stored Wi-Fi credentials and reboots. The device will open the
-      <code>Fan-TestKit-setup</code> SoftAP for re-provisioning.
+      Fan-TestKit-setup SoftAP for re-provisioning.
     </p>
-    <button id="factory_reset" class="danger">Reset Wi-Fi &amp; restart</button>
+    <button id="factory_reset" class="danger" data-i18n="reset_wifi_btn">Reset Wi-Fi &amp; restart</button>
     <span id="factory_reset_status" class="status"></span>
   </section>
 
   <!-- ============== Help panel (bottom — reference material) ============== -->
   <details class="panel help-panel" id="help">
-    <summary>Help</summary>
+    <summary data-i18n="help">Help</summary>
 
-    <h3>Pin assignments</h3>
+    <h3 data-i18n="help_pins_h">Pin assignments</h3>
     <ul id="help-pins">
-      <li>PWM output: GPIO<span data-pin="pwm">?</span></li>
-      <li>Change-trigger output: GPIO<span data-pin="trigger">?</span></li>
-      <li>RPM capture input: GPIO<span data-pin="rpm">?</span></li>
-      <li>Status LED (WS2812): GPIO<span data-pin="status_led">?</span></li>
+      <li><span data-i18n="help_pin_pwm">PWM output:</span> GPIO<span data-pin="pwm">?</span></li>
+      <li><span data-i18n="help_pin_trigger">Change-trigger output:</span> GPIO<span data-pin="trigger">?</span></li>
+      <li><span data-i18n="help_pin_rpm">RPM capture input:</span> GPIO<span data-pin="rpm">?</span></li>
+      <li><span data-i18n="help_pin_led">Status LED (WS2812):</span> GPIO<span data-pin="status_led">?</span></li>
     </ul>
 
-    <h3>Duty / Frequency</h3>
-    <p>Drives the PWM-output pin. Frequency range
+    <h3 data-i18n="help_pwm_h">Duty / Frequency</h3>
+    <p data-i18n="help_pwm_p" data-i18n-html>
+       Drives the PWM-output pin. Frequency range
        <span data-info="freq_min">?</span>&nbsp;Hz to
        <span data-info="freq_max">?</span>&nbsp;Hz.
        Duty resolution decreases at high frequencies — the live
        "duty resolution at this freq" readout shows the current bit count.</p>
 
-    <h3>RPM</h3>
-    <p>Reads tach edges on the RPM-input pin.
-       <em>RPM = edges/sec × 60 / pole pairs.</em>
+    <h3 data-i18n="help_rpm_h">RPM</h3>
+    <p data-i18n="help_rpm_p">Reads tach edges on the RPM-input pin.
+       <em>RPM = edges/sec × 60 × 2 / pole count.</em>
        RPM tunables and slider step sizes live in the Settings panel.</p>
 
-    <h3>Firmware Update</h3>
-    <p>Pick a <code>.bin</code> and click Upload. The device flashes to the
+    <h3 data-i18n="help_ota_h">Firmware Update</h3>
+    <p data-i18n="help_ota_p">Pick a <code>.bin</code> and click Upload. The device flashes to the
        inactive OTA slot and reboots into it.</p>
 
-    <h3>Factory Reset</h3>
-    <p>Clears stored Wi-Fi credentials and reboots. Same effect as holding
+    <h3 data-i18n="help_reset_h">Factory Reset</h3>
+    <p data-i18n="help_reset_p">Clears stored Wi-Fi credentials and reboots. Same effect as holding
        the BOOT button for ≥ 3 seconds.</p>
     <details class="dev-notes">
-      <summary>Developer notes</summary>
-      <p>The same reset is also reachable via USB HID report
+      <summary data-i18n="help_dev_notes">Developer notes</summary>
+      <p data-i18n="help_dev_notes_p">The same reset is also reachable via USB HID report
          <code>0x03</code> with magic byte <code>0xA5</code>, or USB CDC op
          <code>0x20</code> with magic byte <code>0xA5</code>. All four
          entry points land on <code>net_dashboard_factory_reset()</code>.</p>
     </details>
 
-    <h3>Wi-Fi setup fallback</h3>
-    <p>If credentials are missing or wrong, the device opens an open SoftAP
+    <h3 data-i18n="help_wifi_h">Wi-Fi setup fallback</h3>
+    <p data-i18n="help_wifi_p">If credentials are missing or wrong, the device opens an open SoftAP
        named <code>Fan-TestKit-setup</code>. Connect from a phone — the
        captive-portal page lets you enter SSID/password. After success the
        dashboard is reachable at <code>fan-testkit.local</code> or the

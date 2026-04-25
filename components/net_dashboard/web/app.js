@@ -4,6 +4,199 @@
   // ---------- shared helpers ----------
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+  // ---------- i18n ----------
+  const I18N = {
+    en: {
+      app_title: 'Fan-TestKit Dashboard',
+      language: 'Language',
+      settings: 'Settings',
+      rpm: 'RPM',
+      pole_count: 'Pole count',
+      avg_window: 'Avg window',
+      timeout_us: 'Timeout (µs)',
+      apply_rpm: 'Apply RPM',
+      step_sizes: 'Step sizes',
+      duty_step: 'Duty step (%)',
+      freq_step: 'Frequency step (Hz)',
+      step_hint: 'Step sizes apply immediately to the slider step on the Duty / Frequency panels.',
+      live: 'Live',
+      chart: 'Chart',
+      time: 'time',
+      duty: 'Duty',
+      frequency: 'Frequency',
+      fine: 'Fine',
+      presets: 'Presets',
+      duty_res_label: 'duty resolution at this freq:',
+      bits: 'bits',
+      firmware_update: 'Firmware Update',
+      upload_reboot: 'Upload & reboot',
+      factory_reset: 'Factory Reset',
+      factory_reset_warn: 'Clears stored Wi-Fi credentials and reboots. The device will open the Fan-TestKit-setup SoftAP for re-provisioning.',
+      reset_wifi_btn: 'Reset Wi-Fi & restart',
+      help: 'Help',
+      help_pins_h: 'Pin assignments',
+      help_pin_pwm: 'PWM output:',
+      help_pin_trigger: 'Change-trigger output:',
+      help_pin_rpm: 'RPM capture input:',
+      help_pin_led: 'Status LED (WS2812):',
+      help_pwm_h: 'Duty / Frequency',
+      help_pwm_p: 'Drives the PWM-output pin. Frequency range <span data-info="freq_min">?</span>&nbsp;Hz to <span data-info="freq_max">?</span>&nbsp;Hz. Duty resolution decreases at high frequencies — the live "duty resolution at this freq" readout shows the current bit count.',
+      help_rpm_h: 'RPM',
+      help_rpm_p: 'Reads tach edges on the RPM-input pin. <em>RPM = edges/sec × 60 × 2 / pole count.</em> RPM tunables and slider step sizes live in the Settings panel.',
+      help_ota_h: 'Firmware Update',
+      help_ota_p: 'Pick a <code>.bin</code> and click Upload. The device flashes to the inactive OTA slot and reboots into it.',
+      help_reset_h: 'Factory Reset',
+      help_reset_p: 'Clears stored Wi-Fi credentials and reboots. Same effect as holding the BOOT button for ≥ 3 seconds.',
+      help_dev_notes: 'Developer notes',
+      help_dev_notes_p: 'The same reset is also reachable via USB HID report <code>0x03</code> with magic byte <code>0xA5</code>, or USB CDC op <code>0x20</code> with magic byte <code>0xA5</code>. All four entry points land on <code>net_dashboard_factory_reset()</code>.',
+      help_wifi_h: 'Wi-Fi setup fallback',
+      help_wifi_p: 'If credentials are missing or wrong, the device opens an open SoftAP named <code>Fan-TestKit-setup</code>. Connect from a phone — the captive-portal page lets you enter SSID/password. After success the dashboard is reachable at <code>fan-testkit.local</code> or the assigned IP.',
+      factory_confirm: 'Factory reset: clear Wi-Fi credentials and reboot?\n\nThe device will disconnect and open the Fan-TestKit-setup SoftAP for re-provisioning.',
+      factory_sending: 'Sending…',
+      factory_acked: 'Device acknowledged — rebooting…',
+      ota_accepted: 'OTA accepted; device will reboot.',
+      ota_failed: 'OTA failed: ',
+    },
+    'zh-Hant': {
+      app_title: 'Fan-TestKit 儀表板',
+      language: '語言',
+      settings: '設定',
+      rpm: '轉速',
+      pole_count: '極數',
+      avg_window: '平均視窗',
+      timeout_us: '逾時 (µs)',
+      apply_rpm: '套用轉速設定',
+      step_sizes: '步進量',
+      duty_step: '工作週期步進 (%)',
+      freq_step: '頻率步進 (Hz)',
+      step_hint: '步進量會立即套用到工作週期 / 頻率面板的滑桿。',
+      live: '即時',
+      chart: '圖表',
+      time: '時間',
+      duty: '工作週期',
+      frequency: '頻率',
+      fine: '微調',
+      presets: '預設值',
+      duty_res_label: '此頻率的工作週期解析度：',
+      bits: '位元',
+      firmware_update: '韌體更新',
+      upload_reboot: '上傳並重開機',
+      factory_reset: '回復出廠設定',
+      factory_reset_warn: '清除已儲存的 Wi-Fi 帳密並重開機。裝置會開啟 Fan-TestKit-setup SoftAP 供重新配網。',
+      reset_wifi_btn: '重設 Wi-Fi 並重開機',
+      help: '說明',
+      help_pins_h: '腳位配置',
+      help_pin_pwm: 'PWM 輸出：',
+      help_pin_trigger: '變更觸發輸出：',
+      help_pin_rpm: '轉速輸入：',
+      help_pin_led: '狀態 LED (WS2812)：',
+      help_pwm_h: '工作週期 / 頻率',
+      help_pwm_p: '驅動 PWM 輸出腳。頻率範圍 <span data-info="freq_min">?</span>&nbsp;Hz 至 <span data-info="freq_max">?</span>&nbsp;Hz。高頻時工作週期解析度會降低 — 即時顯示的「duty resolution at this freq」會顯示目前位元數。',
+      help_rpm_h: '轉速',
+      help_rpm_p: '讀取轉速輸入腳的 tach 邊緣。<em>RPM = 邊緣數/秒 × 60 × 2 / 極數。</em>轉速調整參數與滑桿步進量都在「設定」面板。',
+      help_ota_h: '韌體更新',
+      help_ota_p: '選一個 <code>.bin</code> 然後按上傳。裝置會把韌體寫入待用 OTA slot 後重開機切過去。',
+      help_reset_h: '回復出廠設定',
+      help_reset_p: '清除已儲存的 Wi-Fi 帳密並重開機。等同按住 BOOT 按鈕 ≥ 3 秒。',
+      help_dev_notes: '開發者備註',
+      help_dev_notes_p: '同樣的 reset 也可以透過 USB HID report <code>0x03</code> + magic byte <code>0xA5</code>，或 USB CDC op <code>0x20</code> + magic byte <code>0xA5</code> 觸發。四個入口最後都會 land 在 <code>net_dashboard_factory_reset()</code>。',
+      help_wifi_h: 'Wi-Fi 設定 fallback',
+      help_wifi_p: '若帳密遺失或錯誤，裝置會開啟名為 <code>Fan-TestKit-setup</code> 的開放 SoftAP。用手機連上 — captive portal 頁面會讓你輸入 SSID / password。成功後 dashboard 可以從 <code>fan-testkit.local</code> 或分配到的 IP 連入。',
+      factory_confirm: '回復出廠設定：清除 Wi-Fi 帳密並重開機？\n\n裝置會中斷連線並開啟 Fan-TestKit-setup SoftAP 供重新配網。',
+      factory_sending: '傳送中…',
+      factory_acked: '裝置已確認 — 重開機中…',
+      ota_accepted: 'OTA 已接受；裝置即將重開機。',
+      ota_failed: 'OTA 失敗：',
+    },
+    'zh-Hans': {
+      app_title: 'Fan-TestKit 仪表板',
+      language: '语言',
+      settings: '设置',
+      rpm: '转速',
+      pole_count: '极数',
+      avg_window: '平均窗口',
+      timeout_us: '超时 (µs)',
+      apply_rpm: '应用转速设置',
+      step_sizes: '步进量',
+      duty_step: '占空比步进 (%)',
+      freq_step: '频率步进 (Hz)',
+      step_hint: '步进量会立即应用到占空比 / 频率面板的滑块。',
+      live: '实时',
+      chart: '图表',
+      time: '时间',
+      duty: '占空比',
+      frequency: '频率',
+      fine: '微调',
+      presets: '预设值',
+      duty_res_label: '当前频率的占空比分辨率：',
+      bits: '位',
+      firmware_update: '固件更新',
+      upload_reboot: '上传并重启',
+      factory_reset: '恢复出厂设置',
+      factory_reset_warn: '清除已保存的 Wi-Fi 凭据并重启。设备会开启 Fan-TestKit-setup SoftAP 供重新配网。',
+      reset_wifi_btn: '重置 Wi-Fi 并重启',
+      help: '帮助',
+      help_pins_h: '引脚分配',
+      help_pin_pwm: 'PWM 输出：',
+      help_pin_trigger: '变更触发输出：',
+      help_pin_rpm: '转速输入：',
+      help_pin_led: '状态 LED (WS2812)：',
+      help_pwm_h: '占空比 / 频率',
+      help_pwm_p: '驱动 PWM 输出引脚。频率范围 <span data-info="freq_min">?</span>&nbsp;Hz 至 <span data-info="freq_max">?</span>&nbsp;Hz。高频时占空比分辨率会降低 — 实时显示的「duty resolution at this freq」会显示当前位数。',
+      help_rpm_h: '转速',
+      help_rpm_p: '读取转速输入引脚的 tach 边沿。<em>RPM = 边沿数/秒 × 60 × 2 / 极数。</em>转速调整参数与滑块步进量都在「设置」面板。',
+      help_ota_h: '固件更新',
+      help_ota_p: '选一个 <code>.bin</code> 然后按上传。设备会把固件写入待用 OTA slot 后重启切过去。',
+      help_reset_h: '恢复出厂设置',
+      help_reset_p: '清除已保存的 Wi-Fi 凭据并重启。等同按住 BOOT 按钮 ≥ 3 秒。',
+      help_dev_notes: '开发者备注',
+      help_dev_notes_p: '同样的 reset 也可以通过 USB HID report <code>0x03</code> + magic byte <code>0xA5</code>，或 USB CDC op <code>0x20</code> + magic byte <code>0xA5</code> 触发。四个入口最后都会 land 在 <code>net_dashboard_factory_reset()</code>。',
+      help_wifi_h: 'Wi-Fi 配网 fallback',
+      help_wifi_p: '若凭据丢失或错误，设备会开启名为 <code>Fan-TestKit-setup</code> 的开放 SoftAP。用手机连上 — captive portal 页面会让你输入 SSID / password。成功后 dashboard 可以从 <code>fan-testkit.local</code> 或分配到的 IP 连入。',
+      factory_confirm: '恢复出厂设置：清除 Wi-Fi 凭据并重启？\n\n设备会断开连接并开启 Fan-TestKit-setup SoftAP 供重新配网。',
+      factory_sending: '发送中…',
+      factory_acked: '设备已确认 — 重启中…',
+      ota_accepted: 'OTA 已接受；设备即将重启。',
+      ota_failed: 'OTA 失败：',
+    },
+  };
+
+  const LANG_STORAGE_KEY = 'fan-testkit:lang';
+  let currentLang = 'en';
+
+  function t(key) {
+    return (I18N[currentLang] && I18N[currentLang][key]) || I18N.en[key] || key;
+  }
+
+  function applyLang(lang) {
+    if (!I18N[lang]) lang = 'en';
+    currentLang = lang;
+    document.documentElement.lang = lang;
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      const key = el.dataset.i18n;
+      const value = t(key);
+      // Strings containing markup (<em>, <code>, data-info spans) round-trip
+      // through innerHTML; plain ones use textContent so any user-controlled
+      // strings stay safely escaped. Translation source is in this file only,
+      // so the HTML side of the fork is trusted.
+      if (/[<&]/.test(value)) {
+        el.innerHTML = value;
+        // After innerHTML overwrite, re-fill any [data-info] placeholders
+        // the helper would normally populate at load time.
+        el.querySelectorAll('[data-info]').forEach(infoEl => {
+          if (deviceInfoMap && deviceInfoMap[infoEl.dataset.info] !== undefined) {
+            infoEl.textContent = deviceInfoMap[infoEl.dataset.info];
+          }
+        });
+      } else {
+        el.textContent = value;
+      }
+    });
+    try { localStorage.setItem(LANG_STORAGE_KEY, lang); } catch (e) { /* ignore */ }
+  }
+
+  let deviceInfoMap = null;
+
   // ---------- Device info (Help block, fetched once) ----------
   async function loadDeviceInfo() {
     try {
@@ -14,11 +207,26 @@
         const v = info.pins ? info.pins[el.dataset.pin] : undefined;
         el.textContent = (v ?? '?').toString();
       });
-      const map = { freq_min: info.freq_hz_min, freq_max: info.freq_hz_max };
+      deviceInfoMap = { freq_min: info.freq_hz_min, freq_max: info.freq_hz_max };
       document.querySelectorAll('[data-info]').forEach(el => {
-        const v = map[el.dataset.info];
+        const v = deviceInfoMap[el.dataset.info];
         el.textContent = (v ?? '?').toString();
       });
+      // Apply device boot defaults to the Settings inputs the first time we
+      // reach them — keeps the dashboard in lockstep with Kconfig defaults.
+      if (info.defaults) {
+        const poleSel = document.getElementById('pole');
+        if (poleSel && info.defaults.pole_count !== undefined) {
+          const want = String(info.defaults.pole_count);
+          // If the device default isn't one of the dropdown options, leave
+          // the dropdown at its HTML default rather than silently coercing.
+          if ([...poleSel.options].some(o => o.value === want)) poleSel.value = want;
+        }
+        const mavgEl = document.getElementById('mavg');
+        if (mavgEl && info.defaults.mavg_count !== undefined) mavgEl.value = info.defaults.mavg_count;
+        const toEl = document.getElementById('timeout_us');
+        if (toEl && info.defaults.rpm_timeout_us !== undefined) toEl.value = info.defaults.rpm_timeout_us;
+      }
     } catch (e) {
       // Help block stays usable with '?' placeholders. Other features unaffected.
     }
@@ -30,6 +238,17 @@
   } else {
     loadDeviceInfo();
   }
+
+  // Language switcher — restore preference, wire <select>, apply default English.
+  (() => {
+    const sel = document.getElementById('lang-select');
+    let stored = null;
+    try { stored = localStorage.getItem(LANG_STORAGE_KEY); } catch (e) { /* ignore */ }
+    const initial = (stored && I18N[stored]) ? stored : 'en';
+    if (sel) sel.value = initial;
+    applyLang(initial);
+    if (sel) sel.addEventListener('change', () => applyLang(sel.value));
+  })();
 
   // Single source of truth for "what's the other axis?" is each panel's
   // current value (kept in sync with device telemetry via setFromDevice).
@@ -355,7 +574,7 @@
         if (typeof msg.rpm === 'number') setRpmFromDevice(msg.rpm);
       } else if (msg.type === 'ack' && msg.op === 'factory_reset') {
         const fs = document.getElementById('factory_reset_status');
-        if (fs) fs.textContent = 'Device acknowledged — rebooting…';
+        if (fs) fs.textContent = t('factory_acked');
       }
     } catch (e) { /* ignore non-JSON / partial frames */ }
   });
@@ -378,21 +597,18 @@
     if (!f) return;
     const prog = document.getElementById('otaprog');
     const r = await fetch('/ota', { method: 'POST', body: f });
-    if (r.ok) { prog.value = 100; alert('OTA accepted; device will reboot.'); }
-    else     { alert(`OTA failed: ${r.status}`); }
+    if (r.ok) { prog.value = 100; alert(t('ota_accepted')); }
+    else     { alert(t('ota_failed') + r.status); }
   });
 
   // ---------- Factory reset ----------
   const factoryBtn = document.getElementById('factory_reset');
   const factoryStatus = document.getElementById('factory_reset_status');
   factoryBtn.addEventListener('click', () => {
-    const ok = confirm(
-      'Factory reset: clear Wi-Fi credentials and reboot?\n\n' +
-      'The device will disconnect and open the Fan-TestKit-setup SoftAP for re-provisioning.'
-    );
+    const ok = confirm(t('factory_confirm'));
     if (!ok) return;
     factoryBtn.disabled = true;
-    factoryStatus.textContent = 'Sending…';
+    factoryStatus.textContent = t('factory_sending');
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'factory_reset' }));
     }

@@ -26,6 +26,6 @@ menu "Fan-TestKit App"
 
     config APP_DEFAULT_MAVG_COUNT
         int "Default RPM moving-average count"
-        default 16
+        default 1
 
 endmenu

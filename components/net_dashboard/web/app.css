@@ -57,12 +57,50 @@ body {
 h1 {
   font-size: 0.78em;
   font-weight: 700;
-  margin: 0 0 1.2em;
-  padding: 0 0.2em 0.7em;
+  margin: 0;
+  padding: 0 0.2em;
   color: var(--muted);
   letter-spacing: 0.18em;
   text-transform: uppercase;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 0.8em;
+  margin: 0 0 1.2em;
+  padding: 0 0.2em 0.7em;
   border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { flex: 1; }
+
+.lang-switch select {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.78em;
+  padding: 0.3em 0.5em;
+  background: var(--bg-inset);
+  color: var(--fg);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.lang-switch select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ============== Panels (rack-mounted plates) ============== */
@@ -159,7 +197,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   letter-spacing: 0.04em;
 }
 
-.settings-grid input {
+.settings-grid input,
+.settings-grid select {
   font: inherit;
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
@@ -172,7 +211,8 @@ details[open] > summary::before { transform: rotate(90deg); }
   width: 8em;
 }
 
-.settings-grid input:focus {
+.settings-grid input:focus,
+.settings-grid select:focus {
   outline: none;
   border-color: var(--accent);
   box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
