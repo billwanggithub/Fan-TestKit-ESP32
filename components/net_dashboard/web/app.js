@@ -361,6 +361,8 @@
   });
 
   // ---------- RPM apply (existing contract) ----------
+  // Inputs (#pole, #mavg, #timeout_us) now live in the unified Settings panel,
+  // but the IDs and WS contract are unchanged.
   document.getElementById('apply_rpm').addEventListener('click', () => {
     const pole = parseInt(document.getElementById('pole').value, 10);
     const mavg = parseInt(document.getElementById('mavg').value, 10);
@@ -368,13 +370,6 @@
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ type: 'set_rpm', pole, mavg, timeout_us }));
     }
-    document.getElementById('rpm-settings').open = false;
-  });
-
-  // Close RPM Settings popover when clicking outside it
-  document.addEventListener('click', (ev) => {
-    const settings = document.getElementById('rpm-settings');
-    if (settings.open && !settings.contains(ev.target)) settings.open = false;
   });
 
   // ---------- OTA ----------

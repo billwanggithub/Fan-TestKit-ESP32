@@ -1,77 +1,108 @@
-:root {
-  color-scheme: light dark;
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  --accent: #2563eb;
-  --accent-fg: #ffffff;
-  --green: #16a34a;
-  --red: #dc2626;
-  --readout: var(--green);
-  --border: #d4d4d8;
-  --muted: #71717a;
-  --bg: #ffffff;
-  --bg-soft: #f4f4f5;
-  --radius: 10px;
-}
+/* ============================================================
+   Fan-TestKit Dashboard — Industrial dark theme
+   Palette A: Machine Shop (amber accent, instrument-green readout)
+   ============================================================ */
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --border: #3f3f46;
-    --muted: #a1a1aa;
-    --bg: #09090b;
-    --bg-soft: #18181b;
-  }
+:root {
+  color-scheme: dark;
+
+  /* layered backgrounds — carbon to brushed steel */
+  --bg:        #0E1116;   /* body / outer */
+  --bg-panel:  #161A21;   /* panel */
+  --bg-inset:  #1F252E;   /* readouts, inputs */
+  --bg-grid:   #374151;   /* chart grid */
+
+  /* borders & rules */
+  --border:        #2A3038;
+  --border-bright: #3A424E;  /* top-edge highlight on panels */
+
+  /* text */
+  --fg:        #E5E7EB;
+  --muted:     #9CA3AF;
+  --hint:      #6B7280;
+
+  /* accents */
+  --accent:     #F59E0B;   /* amber — buttons, focus, slider thumb */
+  --accent-fg:  #0E1116;   /* dark text on amber */
+  --readout:    #10B981;   /* instrument green — big numerics */
+  --green:      #10B981;   /* alias kept for chart code that reads --green */
+  --danger:     #EF4444;
+  --red:        #EF4444;   /* alias */
+  --info:       #3B82F6;
+  --trace:      #22D3EE;   /* oscilloscope cyan for chart line */
+
+  --radius: 4px;
+
+  --font-mono: 'JetBrains Mono', 'Cascadia Mono', 'Fira Code',
+               Consolas, 'Courier New', monospace;
+  --font-ui:   -apple-system, 'Segoe UI', Roboto, sans-serif;
 }
 
 * { box-sizing: border-box; }
 
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 body {
-  max-width: 540px;
+  max-width: 560px;
   margin: 1.25em auto;
-  padding: 0 1em;
-  background: var(--bg-soft);
-  line-height: 1.4;
+  padding: 0 1em 2em;
+  font-family: var(--font-ui);
+  line-height: 1.45;
+  font-size: 14px;
 }
 
 h1 {
-  font-size: 1.05em;
-  font-weight: 600;
-  margin: 0 0 1em;
-  padding: 0 0.2em;
+  font-size: 0.78em;
+  font-weight: 700;
+  margin: 0 0 1.2em;
+  padding: 0 0.2em 0.7em;
   color: var(--muted);
-  letter-spacing: 0.05em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
+  border-bottom: 1px solid var(--border);
 }
 
+/* ============== Panels (rack-mounted plates) ============== */
+
 .panel {
-  background: var(--bg);
+  background: var(--bg-panel);
   border: 1px solid var(--border);
+  border-top-color: var(--border-bright);  /* subtle metal-edge highlight */
   border-radius: var(--radius);
-  padding: 1em 1.1em;
-  margin: 0 0 1em;
+  padding: 0.95em 1.05em;
+  margin: 0 0 0.85em;
+  position: relative;
 }
 
 .panel h2 {
-  font-size: 0.78em;
-  font-weight: 600;
+  font-size: 0.72em;
+  font-weight: 700;
   margin: 0 0 0.7em;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
 }
 
-/* Shared <details> chevron */
+/* ============== <details> sections ============== */
+
 details {
   border-top: 1px solid var(--border);
-  margin-top: 0.9em;
+  margin-top: 0.85em;
   padding-top: 0.7em;
 }
 
 details > summary {
   cursor: pointer;
-  font-weight: 500;
+  font-weight: 600;
   list-style: none;
   user-select: none;
   color: var(--muted);
+  font-size: 0.78em;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 details > summary::-webkit-details-marker { display: none; }
@@ -79,13 +110,82 @@ details > summary::-webkit-details-marker { display: none; }
 details > summary::before {
   content: "▸";
   display: inline-block;
-  transition: transform 0.15s;
-  margin-right: 0.4em;
+  transition: transform 0.15s ease;
+  margin-right: 0.5em;
+  color: var(--accent);
 }
 
 details[open] > summary::before { transform: rotate(90deg); }
 
-/* ============== PWM panels ============== */
+/* ============== Settings panel ============== */
+
+.settings-panel {
+  border-top: 1px solid var(--border);
+}
+
+.settings-section {
+  border-top: 1px solid var(--border);
+  margin-top: 0.9em;
+  padding-top: 0.85em;
+}
+
+.settings-section:first-of-type {
+  border-top: none;
+  margin-top: 0.85em;
+  padding-top: 0;
+}
+
+.settings-section h3 {
+  font-size: 0.7em;
+  font-weight: 700;
+  margin: 0 0 0.7em;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  row-gap: 0.5em;
+  column-gap: 1em;
+  align-items: center;
+  margin-bottom: 0.8em;
+}
+
+.settings-grid label {
+  color: var(--muted);
+  font-size: 0.85em;
+  letter-spacing: 0.04em;
+}
+
+.settings-grid input {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  padding: 0.35em 0.6em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
+  text-align: right;
+  width: 8em;
+}
+
+.settings-grid input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
+}
+
+.settings-hint {
+  color: var(--hint);
+  font-size: 0.78em;
+  margin: 0.5em 0 0;
+  font-style: italic;
+}
+
+/* ============== PWM panels (Duty / Frequency) ============== */
 
 .pwm-panel .row {
   display: flex;
@@ -97,31 +197,35 @@ details[open] > summary::before { transform: rotate(90deg); }
 
 .pwm-panel .label {
   color: var(--muted);
-  font-size: 0.95em;
-  min-width: 3em;
+  font-size: 0.72em;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  min-width: 5.5em;
 }
-
-.pwm-panel .label.tight { min-width: auto; }
 
 .pwm-panel .readout-input {
   flex: 1;
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 2em;
+  font-size: 2.2em;
   font-weight: 700;
   color: var(--readout);
   text-align: center;
-  background: var(--bg-soft);
-  border: 1px solid transparent;
-  border-radius: 6px;
-  padding: 0.05em 0.3em;
-  font-family: inherit;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.1em 0.3em;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 8px rgba(16, 185, 129, 0.25);
   -moz-appearance: textfield;
 }
 
 .pwm-panel .readout-input:focus {
   outline: none;
   border-color: var(--accent);
-  background: var(--bg);
+  background: #232934;
+  box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.18);
 }
 
 .pwm-panel .readout-input::-webkit-inner-spin-button,
@@ -132,43 +236,66 @@ details[open] > summary::before { transform: rotate(90deg); }
 
 .pwm-panel .unit {
   color: var(--muted);
-  font-weight: 500;
-  margin-left: 0.1em;
+  font-weight: 600;
+  font-size: 0.85em;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
-.pwm-panel input[type=number].step {
-  font: inherit;
-  padding: 0.3em 0.5em;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  width: 4em;
-  text-align: right;
-  background: var(--bg);
-  color: inherit;
-  font-variant-numeric: tabular-nums;
-}
-
-.pwm-panel input[type=range] {
+/* slider — recessed track + amber square thumb */
+input[type=range] {
   flex: 1;
-  accent-color: var(--accent);
+  appearance: none;
+  -webkit-appearance: none;
+  height: 6px;
+  background: linear-gradient(to bottom, #0a0d12 0%, #1a1f27 100%);
+  border: 1px solid #0a0d12;
+  border-radius: 2px;
+  outline: none;
+}
+
+input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 22px;
+  background: linear-gradient(to bottom, #FBBF24, #D97706);
+  border: 1px solid #92400E;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+input[type=range]::-moz-range-thumb {
+  width: 16px;
+  height: 22px;
+  background: linear-gradient(to bottom, #FBBF24, #D97706);
+  border: 1px solid #92400E;
+  border-radius: 2px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
 }
 
 .pwm-panel .ticks {
   display: flex;
   justify-content: space-between;
-  color: var(--muted);
-  font-size: 0.78em;
+  color: var(--hint);
+  font-family: var(--font-mono);
+  font-size: 0.72em;
   padding: 0 0.3em;
-  margin-top: -0.1em;
+  margin-top: 0.3em;
 }
 
 .pwm-panel .resbits {
   text-align: right;
   color: var(--muted);
-  font-size: 0.78em;
+  font-family: var(--font-mono);
+  font-size: 0.75em;
   margin-top: 0.4em;
+  letter-spacing: 0.02em;
 }
 
+/* fine-tune buttons — flat industrial keys */
 .pwm-panel .grid-finetune {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -177,18 +304,32 @@ details[open] > summary::before { transform: rotate(90deg); }
 }
 
 .pwm-panel .grid-finetune button {
-  padding: 0.6em 0;
-  border-radius: 6px;
-  border: none;
+  padding: 0.65em 0;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-bright);
   cursor: pointer;
   font: inherit;
-  font-weight: 600;
-  color: #fff;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.9em;
+  background: var(--bg-inset);
+  letter-spacing: 0.04em;
+  transition: background 0.1s, border-color 0.1s;
 }
 
-.pwm-panel .grid-finetune .pos { background: var(--green); }
-.pwm-panel .grid-finetune .neg { background: var(--red); }
+.pwm-panel .grid-finetune .pos { color: var(--readout); }
+.pwm-panel .grid-finetune .neg { color: var(--danger); }
 
+.pwm-panel .grid-finetune button:hover {
+  background: #232934;
+  border-color: var(--accent);
+}
+
+.pwm-panel .grid-finetune button:active {
+  background: #0a0d12;
+}
+
+/* presets */
 .pwm-panel .preset-grid {
   display: grid;
   grid-template-columns: 1fr auto 1fr auto;
@@ -199,46 +340,68 @@ details[open] > summary::before { transform: rotate(90deg); }
 .pwm-panel .preset-grid input {
   width: 100%;
   font: inherit;
-  padding: 0.35em 0.5em;
+  font-family: var(--font-mono);
+  padding: 0.4em 0.5em;
   border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: inherit;
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  color: var(--fg);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
+.pwm-panel .preset-grid input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
 .pwm-panel .preset-grid button {
-  padding: 0.35em 0.9em;
-  border-radius: 4px;
-  border: none;
+  padding: 0.4em 0.95em;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
   cursor: pointer;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.78em;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  transition: background 0.1s, color 0.1s;
+}
+
+.pwm-panel .preset-grid button:hover {
   background: var(--accent);
   color: var(--accent-fg);
-  font: inherit;
-  font-weight: 500;
 }
 
 /* ============== RPM panel ============== */
 
 .rpm-header {
   display: flex;
-  align-items: center;
-  gap: 0.8em;
+  align-items: baseline;
+  gap: 0.6em;
   margin-bottom: 0.4em;
 }
 
 .rpm-header .big {
+  font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 2.2em;
+  font-size: 2.6em;
   font-weight: 700;
   color: var(--readout);
   line-height: 1;
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 10px rgba(16, 185, 129, 0.3);
 }
 
 .rpm-header .unit {
-  font-size: 0.95em;
+  font-size: 0.78em;
+  font-weight: 600;
   color: var(--muted);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .rpm-header .spacer { flex: 1; }
@@ -248,100 +411,23 @@ details[open] > summary::before { transform: rotate(90deg); }
   align-items: center;
   gap: 0.4em;
   color: var(--muted);
-  font-size: 0.85em;
+  font-size: 0.78em;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   cursor: pointer;
   user-select: none;
 }
 
 .rpm-header .live-toggle input { accent-color: var(--accent); }
 
-/* RPM Settings popover-style details */
-.rpm-settings {
-  position: relative;
-  display: inline-block;
-  border-top: none;
-  margin-top: 0;
-  padding-top: 0;
-}
-
-.rpm-settings > summary {
-  list-style: none;
-  cursor: pointer;
-  color: var(--muted);
-  font-size: 0.85em;
-  padding: 0.35em 0.7em;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  user-select: none;
-}
-
-.rpm-settings > summary::-webkit-details-marker { display: none; }
-
-.rpm-settings > summary::before {
-  content: "⚙";
-  margin-right: 0.3em;
-}
-
-.rpm-settings[open] > summary {
-  background: var(--bg-soft);
-  color: inherit;
-}
-
-.rpm-settings .popover {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 0.7em 0.9em;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-  z-index: 10;
-  min-width: 280px;
-}
-
-.rpm-settings .popover .field {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 0.4em 0.7em;
-  align-items: center;
-  font-size: 0.9em;
-  color: var(--muted);
-  margin-bottom: 0.7em;
-}
-
-.rpm-settings .popover .field input {
-  font: inherit;
-  padding: 0.3em 0.5em;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--bg);
-  color: inherit;
-  text-align: right;
-  width: 7em;
-  justify-self: end;
-  font-variant-numeric: tabular-nums;
-}
-
-.rpm-settings .popover button {
-  width: 100%;
-  padding: 0.45em 0;
-  border-radius: 4px;
-  border: none;
-  cursor: pointer;
-  background: var(--accent);
-  color: var(--accent-fg);
-  font: inherit;
-  font-weight: 500;
-}
-
-/* RPM chart with axes */
+/* chart */
 canvas#chart {
   width: 100%;
   height: 140px;
-  background: var(--bg-soft);
-  border-radius: 6px;
+  background: linear-gradient(to bottom, #0a0d12 0%, #1a1f27 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   display: block;
 }
 
@@ -357,8 +443,8 @@ canvas#chart {
   flex-direction: row;
   align-items: stretch;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.7em;
-  font-variant-numeric: tabular-nums;
 }
 
 .y-label {
@@ -367,9 +453,8 @@ canvas#chart {
   color: var(--muted);
   font-size: 0.72em;
   align-self: center;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   padding: 0 2px;
 }
 
@@ -378,7 +463,7 @@ canvas#chart {
   flex-direction: column;
   justify-content: space-between;
   padding: 2px 4px 2px 0;
-  min-width: 32px;
+  min-width: 36px;
   text-align: right;
 }
 
@@ -393,9 +478,9 @@ canvas#chart {
   display: flex;
   justify-content: space-between;
   color: var(--muted);
+  font-family: var(--font-mono);
   font-size: 0.7em;
   padding: 2px 0.2em 0;
-  font-variant-numeric: tabular-nums;
 }
 
 .x-label {
@@ -403,9 +488,34 @@ canvas#chart {
   color: var(--muted);
   font-size: 0.72em;
   margin-top: 2px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
-/* ============== OTA panel ============== */
+/* ============== Buttons (shared) ============== */
+
+.btn-primary {
+  padding: 0.55em 1.2em;
+  border-radius: var(--radius);
+  border: 1px solid var(--accent);
+  cursor: pointer;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  font-size: 0.82em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: background 0.1s, color 0.1s;
+}
+
+.btn-primary:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+
+/* ============== OTA ============== */
 
 .ota-controls {
   display: flex;
@@ -417,19 +527,20 @@ canvas#chart {
 .ota-controls input[type=file] {
   flex: 1;
   font: inherit;
-  color: inherit;
+  color: var(--muted);
   min-width: 0;
 }
 
-.ota-controls button {
-  padding: 0.45em 1em;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  background: var(--accent);
-  color: var(--accent-fg);
+.ota-controls input[type=file]::file-selector-button {
+  background: var(--bg-inset);
+  color: var(--fg);
+  border: 1px solid var(--border-bright);
+  border-radius: var(--radius);
+  padding: 0.4em 0.8em;
   font: inherit;
-  font-weight: 500;
+  font-size: 0.85em;
+  cursor: pointer;
+  margin-right: 0.6em;
 }
 
 progress#otaprog {
@@ -437,85 +548,103 @@ progress#otaprog {
   margin-top: 0.7em;
   width: 100%;
   height: 8px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  overflow: hidden;
 }
 
-/* ============== Factory-reset panel ============== */
+progress#otaprog::-webkit-progress-bar { background: var(--bg-inset); }
+progress#otaprog::-webkit-progress-value { background: var(--accent); }
+progress#otaprog::-moz-progress-bar { background: var(--accent); }
+
+/* ============== Factory reset ============== */
 
 .warn {
   color: var(--muted);
-  font-size: 0.9em;
+  font-size: 0.85em;
   margin: 0.2em 0 0.7em;
 }
 
 button.danger {
-  padding: 0.45em 1em;
-  border-radius: 6px;
-  border: 1px solid var(--red);
+  padding: 0.55em 1.2em;
+  border-radius: var(--radius);
+  border: 1px solid var(--danger);
   cursor: pointer;
   background: transparent;
-  color: var(--red);
+  color: var(--danger);
   font: inherit;
-  font-weight: 600;
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: 0.82em;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: background 0.1s, color 0.1s;
+}
+
+button.danger:hover {
+  background: var(--danger);
+  color: var(--bg);
 }
 
 button.danger[disabled] {
   border-color: var(--muted);
   color: var(--muted);
   cursor: not-allowed;
+  background: transparent;
 }
 
 .status {
   margin-left: 0.8em;
-  font-size: 0.9em;
+  font-size: 0.82em;
   color: var(--muted);
+  font-family: var(--font-mono);
 }
 
-/* ============== Help panel ============== */
-
-/* .help-panel inherits .panel chrome (border, radius, padding). The rules
-   below only add help-specific sizing for summary, headings, lists, code,
-   and the nested Developer notes. */
+/* ============== Help ============== */
 
 .help-panel > summary {
-  /* Match h2 weight inside other panels — Help is a sibling section. */
-  font-size: 0.78em;
-  font-weight: 600;
+  font-size: 0.72em;
+  font-weight: 700;
   color: var(--muted);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.14em;
 }
 
 .help-panel h3 {
-  font-size: 0.92em;
-  font-weight: 600;
+  font-size: 0.78em;
+  font-weight: 700;
   margin: 1em 0 0.3em;
-  color: inherit;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
 }
 
-.help-panel h3:first-of-type { margin-top: 0.7em; }
+.help-panel h3:first-of-type { margin-top: 0.85em; }
 
 .help-panel p,
 .help-panel ul {
   margin: 0.3em 0;
-  font-size: 0.92em;
+  font-size: 0.88em;
 }
 
-.help-panel ul {
-  padding-left: 1.4em;
-}
+.help-panel ul { padding-left: 1.4em; }
 
 .help-panel li + li { margin-top: 0.15em; }
 
 .help-panel code {
-  font-size: 0.92em;
-  background: var(--bg-soft);
-  padding: 0.05em 0.3em;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  background: var(--bg-inset);
+  padding: 0.1em 0.4em;
   border-radius: 3px;
+  color: var(--accent);
+  border: 1px solid var(--border);
 }
 
 .help-panel .dev-notes {
   margin-top: 0.5em;
-  font-size: 0.88em;
+  font-size: 0.86em;
 }
 
 .help-panel .dev-notes > summary {
