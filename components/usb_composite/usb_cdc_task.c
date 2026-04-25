@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
+#include "freertos/semphr.h"
 
 #include "tinyusb.h"
 #include "tusb.h"
@@ -14,6 +15,7 @@
 #include "usb_protocol.h"
 #include "app_api.h"
 #include "gpio_io.h"
+#include "psu_modbus.h"
 #include "ota_core.h"
 #include "net_dashboard.h"
 
@@ -21,8 +23,9 @@ static const char *TAG = "usb_cdc";
 
 #define CDC_LOG_RB_BYTES  4096
 
-static RingbufHandle_t s_log_rb;
-static vprintf_like_t  s_prev_vprintf;
+static RingbufHandle_t   s_log_rb;
+static vprintf_like_t    s_prev_vprintf;
+static SemaphoreHandle_t s_cdc_tx_mutex;
 
 // ESP_LOG redirect: copy to the ring buffer, also fall through to UART.
 static int cdc_vprintf(const char *fmt, va_list ap)
@@ -39,6 +42,7 @@ static int cdc_vprintf(const char *fmt, va_list ap)
 // Write bytes to CDC with SLIP-framed op 0x01 (log).
 static void cdc_send_log_frame(const uint8_t *data, size_t len)
 {
+    if (s_cdc_tx_mutex && xSemaphoreTake(s_cdc_tx_mutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
     uint8_t end = USB_CDC_SLIP_END;
     uint8_t op  = USB_CDC_OP_LOG;
     tud_cdc_write(&end, 1);
@@ -57,6 +61,7 @@ static void cdc_send_log_frame(const uint8_t *data, size_t len)
     }
     tud_cdc_write(&end, 1);
     tud_cdc_write_flush();
+    if (s_cdc_tx_mutex) xSemaphoreGive(s_cdc_tx_mutex);
 }
 
 // ---- SLIP parser for incoming OTA frames -----------------------------------
@@ -72,6 +77,7 @@ typedef struct {
 
 static void send_ota_status(uint8_t state, uint32_t progress, uint8_t error)
 {
+    if (s_cdc_tx_mutex && xSemaphoreTake(s_cdc_tx_mutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
     usb_cdc_ota_status_t st = { .state = state, .progress = progress, .error = error };
     uint8_t end = USB_CDC_SLIP_END;
     uint8_t st_op = USB_CDC_OP_OTA_STATUS;
@@ -80,6 +86,7 @@ static void send_ota_status(uint8_t state, uint32_t progress, uint8_t error)
     tud_cdc_write(&st, sizeof(st));
     tud_cdc_write(&end, 1);
     tud_cdc_write_flush();
+    if (s_cdc_tx_mutex) xSemaphoreGive(s_cdc_tx_mutex);
 }
 
 static void handle_frame(const uint8_t *data, size_t len)
@@ -158,14 +165,47 @@ static void handle_frame(const uint8_t *data, size_t len)
             break;
         }
         // Send empty-payload ack frame so host knows the reset is committing.
-        uint8_t end = USB_CDC_SLIP_END;
-        uint8_t ack_op = USB_CDC_OP_FACTORY_ACK;
-        tud_cdc_write(&end, 1);
-        tud_cdc_write(&ack_op, 1);
-        tud_cdc_write(&end, 1);
-        tud_cdc_write_flush();
+        if (s_cdc_tx_mutex && xSemaphoreTake(s_cdc_tx_mutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+            uint8_t end = USB_CDC_SLIP_END;
+            uint8_t ack_op = USB_CDC_OP_FACTORY_ACK;
+            tud_cdc_write(&end, 1);
+            tud_cdc_write(&ack_op, 1);
+            tud_cdc_write(&end, 1);
+            tud_cdc_write_flush();
+            xSemaphoreGive(s_cdc_tx_mutex);
+        }
         ESP_LOGW(TAG, "factory_reset requested via CDC");
         net_dashboard_factory_reset();
+    } break;
+    case USB_CDC_OP_PSU_SET_VOLTAGE: {
+        if (plen < 4) break;
+        ctrl_cmd_t c = { .kind = CTRL_CMD_PSU_SET_VOLTAGE };
+        memcpy(&c.psu_set_voltage.v, payload, 4);
+        control_task_post(&c, 0);
+    } break;
+    case USB_CDC_OP_PSU_SET_CURRENT: {
+        if (plen < 4) break;
+        ctrl_cmd_t c = { .kind = CTRL_CMD_PSU_SET_CURRENT };
+        memcpy(&c.psu_set_current.i, payload, 4);
+        control_task_post(&c, 0);
+    } break;
+    case USB_CDC_OP_PSU_SET_OUTPUT: {
+        if (plen < 1) break;
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_PSU_SET_OUTPUT,
+            .psu_set_output = { .on = payload[0] ? 1u : 0u },
+        };
+        control_task_post(&c, 0);
+    } break;
+    case USB_CDC_OP_PSU_SET_SLAVE: {
+        if (plen < 2) break;
+        if (payload[1] != USB_CDC_PSU_SLAVE_MAGIC) break;
+        if (payload[0] < 1 || payload[0] > 247)    break;
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_PSU_SET_SLAVE,
+            .psu_set_slave = { .addr = payload[0] },
+        };
+        control_task_post(&c, 0);
     } break;
     default:
         ESP_LOGW(TAG, "unknown CDC op 0x%02x", op);
@@ -233,10 +273,69 @@ static void cdc_rx_task(void *arg)
     }
 }
 
+// ---- PSU telemetry push (op 0x44 @ 5 Hz) -----------------------------------
+
+// SLIP-escaped writer used for both the op byte and the float payload.
+// Caller holds s_cdc_tx_mutex.
+static void cdc_write_byte_escaped(uint8_t b)
+{
+    if (b == USB_CDC_SLIP_END) {
+        uint8_t esc[2] = { USB_CDC_SLIP_ESC, USB_CDC_SLIP_ESC_END };
+        tud_cdc_write(esc, 2);
+    } else if (b == USB_CDC_SLIP_ESC) {
+        uint8_t esc[2] = { USB_CDC_SLIP_ESC, USB_CDC_SLIP_ESC_ESC };
+        tud_cdc_write(esc, 2);
+    } else {
+        tud_cdc_write(&b, 1);
+    }
+}
+
+static void cdc_psu_telemetry_task(void *arg)
+{
+    (void)arg;
+    const TickType_t period = pdMS_TO_TICKS(200);   // 5 Hz
+    TickType_t last = xTaskGetTickCount();
+    while (true) {
+        vTaskDelayUntil(&last, period);
+        if (!tud_cdc_connected()) continue;
+
+        psu_modbus_telemetry_t pt;
+        psu_modbus_get_telemetry(&pt);
+
+        // Frame body: [op][v_set LE][i_set LE][v_out LE][i_out LE][flags]
+        // 17 payload bytes (4×float + 1×u8). Op byte adds 1 = 18 byte body.
+        uint8_t body[1 /*op*/ + 4*4 /*floats*/ + 1 /*flags*/];
+        body[0]  = USB_CDC_OP_PSU_TELEMETRY;
+        memcpy(&body[1],  &pt.v_set, 4);
+        memcpy(&body[5],  &pt.i_set, 4);
+        memcpy(&body[9],  &pt.v_out, 4);
+        memcpy(&body[13], &pt.i_out, 4);
+        body[17] = (uint8_t)((pt.output_on ? 0x01u : 0u) | (pt.link_ok ? 0x02u : 0u));
+
+        if (!s_cdc_tx_mutex) continue;
+        if (xSemaphoreTake(s_cdc_tx_mutex, pdMS_TO_TICKS(50)) != pdTRUE) continue;
+
+        uint8_t end = USB_CDC_SLIP_END;
+        tud_cdc_write(&end, 1);
+        // Op byte is 0x44 — never collides with SLIP_END/ESC, but pass through
+        // the escaping helper for consistency.
+        cdc_write_byte_escaped(body[0]);
+        for (size_t i = 1; i < sizeof(body); i++) {
+            cdc_write_byte_escaped(body[i]);
+        }
+        tud_cdc_write(&end, 1);
+        tud_cdc_write_flush();
+
+        xSemaphoreGive(s_cdc_tx_mutex);
+    }
+}
+
 void usb_cdc_task_start(void)
 {
     s_log_rb = xRingbufferCreate(CDC_LOG_RB_BYTES, RINGBUF_TYPE_BYTEBUF);
+    s_cdc_tx_mutex = xSemaphoreCreateMutex();
     s_prev_vprintf = esp_log_set_vprintf(cdc_vprintf);
-    xTaskCreate(cdc_tx_task, "usb_cdc_tx", 4096, NULL, 2, NULL);
-    xTaskCreate(cdc_rx_task, "usb_cdc_rx", 4096, NULL, 2, NULL);
+    xTaskCreate(cdc_tx_task,            "usb_cdc_tx",  4096, NULL, 2, NULL);
+    xTaskCreate(cdc_rx_task,            "usb_cdc_rx",  4096, NULL, 2, NULL);
+    xTaskCreate(cdc_psu_telemetry_task, "cdc_psu_tel", 3072, NULL, 2, NULL);
 }
