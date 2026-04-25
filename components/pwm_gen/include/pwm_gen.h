@@ -8,6 +8,12 @@
 extern "C" {
 #endif
 
+// Frequency range supported by pwm_gen_set(). Below MIN the 16-bit MCPWM
+// counter can't span a full period at the LO band's resolution; above MAX
+// the HI band's resolution would yield <2 ticks/period.
+#define PWM_GEN_FREQ_MIN_HZ 10u
+#define PWM_GEN_FREQ_MAX_HZ 1000000u
+
 typedef struct {
     gpio_num_t pwm_gpio;
     gpio_num_t trigger_gpio;

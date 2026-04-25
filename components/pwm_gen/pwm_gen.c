@@ -43,8 +43,10 @@
 // 改用 MCPWM group 1（但同顆 GPIO 不能同時掛兩個 group 的 generator，band cross
 // 會要 delete+recreate 整條 generator chain，比現有 teardown 還久）。本檔案
 // out of scope。
-#define PWM_FREQ_MIN_HZ 10u
-#define PWM_FREQ_MAX_HZ 1000000u
+// Range constants live in the public header so other components
+// (net_dashboard's /api/device_info) can read them without duplicating literals.
+#define PWM_FREQ_MIN_HZ PWM_GEN_FREQ_MIN_HZ
+#define PWM_FREQ_MAX_HZ PWM_GEN_FREQ_MAX_HZ
 
 typedef struct {
     uint32_t resolution_hz;
