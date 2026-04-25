@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 
 #include "gpio_io.h"
+#include "psu_modbus.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 
@@ -100,13 +101,34 @@ static void control_task(void *arg)
             // Wired in Phase 5. For now, silently acknowledge so senders don't block.
             ESP_LOGW(TAG, "OTA command received but ota_core not wired yet");
             break;
-        case CTRL_CMD_PSU_SET_VOLTAGE:
-        case CTRL_CMD_PSU_SET_CURRENT:
-        case CTRL_CMD_PSU_SET_OUTPUT:
-        case CTRL_CMD_PSU_SET_SLAVE:
-            // Wired in Task 9. For now, silently acknowledge so senders don't block.
-            ESP_LOGW(TAG, "PSU command received but psu_modbus not wired yet");
-            break;
+        case CTRL_CMD_PSU_SET_VOLTAGE: {
+            esp_err_t e = psu_modbus_set_voltage(cmd.psu_set_voltage.v);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "psu_set_voltage(%.2f) failed: %s",
+                         (double)cmd.psu_set_voltage.v, esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_PSU_SET_CURRENT: {
+            esp_err_t e = psu_modbus_set_current(cmd.psu_set_current.i);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "psu_set_current(%.3f) failed: %s",
+                         (double)cmd.psu_set_current.i, esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_PSU_SET_OUTPUT: {
+            esp_err_t e = psu_modbus_set_output(cmd.psu_set_output.on != 0);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "psu_set_output(%u) failed: %s",
+                         cmd.psu_set_output.on, esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_PSU_SET_SLAVE: {
+            esp_err_t e = psu_modbus_set_slave_addr(cmd.psu_set_slave.addr);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "psu_set_slave(%u) failed: %s",
+                         cmd.psu_set_slave.addr, esp_err_to_name(e));
+            }
+        } break;
         }
     }
 }

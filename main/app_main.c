@@ -13,6 +13,7 @@
 
 #include "sdkconfig.h"
 #include "gpio_io.h"
+#include "psu_modbus.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "app_api.h"
@@ -303,9 +304,11 @@ void app_main(void)
     ESP_ERROR_CHECK(rpm_cap_init(&rpm_cfg));
 
     ESP_ERROR_CHECK(gpio_io_init());
+    ESP_ERROR_CHECK(psu_modbus_init());
 
     ESP_ERROR_CHECK(ota_core_init());
     ESP_ERROR_CHECK(control_task_start());
+    ESP_ERROR_CHECK(psu_modbus_start());
 
     // Drive the default setpoint through the same path every later command
     // uses (pwm_gen_set → publish_pwm). This makes the published atomics, the
