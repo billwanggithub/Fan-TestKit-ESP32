@@ -171,6 +171,8 @@ static void telemetry_task(void *arg)
 {
     TickType_t last = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(50);  // 20 Hz to the browser
+    char payload[768];
+    static const char *mode_short[] = { "i_pd", "i_pu", "i_fl", "o" };
     while (true) {
         vTaskDelayUntil(&last, period);
         if (!s_httpd_for_telemetry) continue;
@@ -178,11 +180,30 @@ static void telemetry_task(void *arg)
         uint32_t f; float d;
         control_task_get_pwm(&f, &d);
         float rpm = rpm_cap_get_latest();
-        char payload[160];
+        gpio_io_state_t st[GPIO_IO_PIN_COUNT];
+        gpio_io_get_all(st);
+        bool power = gpio_io_get_power();
+        uint32_t pw = gpio_io_get_pulse_width_ms();
+
         int64_t ts = (int64_t)xTaskGetTickCount() * portTICK_PERIOD_MS;
-        snprintf(payload, sizeof(payload),
-                 "{\"type\":\"status\",\"freq\":%lu,\"duty\":%.2f,\"rpm\":%.2f,\"ts\":%" PRId64 "}",
-                 (unsigned long)f, d, rpm, ts);
+
+        int n = snprintf(payload, sizeof(payload),
+                "{\"type\":\"status\",\"freq\":%lu,\"duty\":%.2f,\"rpm\":%.2f,\"ts\":%" PRId64
+                ",\"power\":%d,\"pulse_width_ms\":%lu,\"gpio\":[",
+                (unsigned long)f, d, rpm, ts, power ? 1 : 0, (unsigned long)pw);
+
+        for (int i = 0; i < GPIO_IO_PIN_COUNT && n < (int)sizeof(payload); i++) {
+            n += snprintf(payload + n, sizeof(payload) - n,
+                          "%s{\"m\":\"%s\",\"v\":%d,\"p\":%d}",
+                          (i == 0) ? "" : ",",
+                          mode_short[st[i].mode],
+                          st[i].level ? 1 : 0,
+                          st[i].pulsing ? 1 : 0);
+        }
+        if (n < (int)sizeof(payload)) {
+            n += snprintf(payload + n, sizeof(payload) - n, "]}");
+        }
+
         for (int i = 0; i < MAX_CLIENTS; i++) {
             if (s_client_fds[i] != 0) ws_send_json_to(s_client_fds[i], payload);
         }
