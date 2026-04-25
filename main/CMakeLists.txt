@@ -8,6 +8,7 @@ idf_component_register(
                 usb_composite
                 net_dashboard
                 ota_core
+                gpio_io
                 esp_event
                 esp_timer
                 console
