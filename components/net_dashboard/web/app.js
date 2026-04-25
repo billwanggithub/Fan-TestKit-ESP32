@@ -78,6 +78,16 @@
       help_pin_group_b: 'GPIO Group B:',
       help_gpio_h: 'GPIO & Power',
       help_gpio_p: 'Group A defaults to input (pull-down) and Group B defaults to output (low). Each pin can be flipped between input and output at runtime; outputs support level toggle and a one-shot pulse of configurable width. Power switch toggles a GPIO whose polarity (active-high / active-low) is set at build time via Kconfig.',
+      psu_title: 'Power Supply',
+      psu_v_set: 'V set',
+      psu_i_set: 'I set',
+      psu_output: 'Output',
+      psu_measured: 'measured',
+      psu_off: 'OFF',
+      psu_on: 'ON',
+      psu_slave_lbl: 'Slave addr',
+      psu_save: 'Save',
+      psu_offline: 'PSU offline',
     },
     'zh-Hant': {
       app_title: 'Fan-TestKit 儀表板',
@@ -151,6 +161,16 @@
       help_pin_group_b: 'GPIO B 組：',
       help_gpio_h: 'GPIO 與電源',
       help_gpio_p: 'A 組預設為輸入（下拉），B 組預設為輸出（低）。每隻 pin 可在執行時切換輸入 / 輸出；輸出模式支援切換準位以及單發脈衝（脈衝寬度可設）。電源開關控制一隻 GPIO，其 active-high / active-low 由 Kconfig 編譯時決定。',
+      psu_title: '電源供應器',
+      psu_v_set: '電壓設定',
+      psu_i_set: '電流設定',
+      psu_output: '輸出',
+      psu_measured: '實測',
+      psu_off: '關',
+      psu_on: '開',
+      psu_slave_lbl: '從機位址',
+      psu_save: '儲存',
+      psu_offline: 'PSU 離線',
     },
     'zh-Hans': {
       app_title: 'Fan-TestKit 仪表板',
@@ -224,6 +244,16 @@
       help_pin_group_b: 'GPIO B 组：',
       help_gpio_h: 'GPIO 与电源',
       help_gpio_p: 'A 组默认为输入（下拉），B 组默认为输出（低）。每个 pin 可在运行时切换输入 / 输出；输出模式支持切换电平以及单发脉冲（脉冲宽度可设）。电源开关控制一个 GPIO，其 active-high / active-low 由 Kconfig 编译时决定。',
+      psu_title: '电源供应器',
+      psu_v_set: '电压设定',
+      psu_i_set: '电流设定',
+      psu_output: '输出',
+      psu_measured: '实测',
+      psu_off: '关',
+      psu_on: '开',
+      psu_slave_lbl: '从机地址',
+      psu_save: '保存',
+      psu_offline: 'PSU 离线',
     },
   };
 
@@ -300,6 +330,7 @@
         const toEl = document.getElementById('timeout_us');
         if (toEl && info.defaults.rpm_timeout_us !== undefined) toEl.value = info.defaults.rpm_timeout_us;
       }
+      psuPanel.setRanges(info);
     } catch (e) {
       // Help block stays usable with '?' placeholders. Other features unaffected.
     }
@@ -775,6 +806,98 @@
     });
   }
 
+  // ---------- Power Supply panel ----------
+  const psuPanel = (() => {
+    const panelEl    = document.getElementById('psu-panel');
+    const modelEl    = document.getElementById('psu-model');
+    const slaveEl    = document.getElementById('psu-slave');
+    const linkEl     = document.getElementById('psu-link');
+    const vSlider    = document.getElementById('psu-v-slider');
+    const vInput     = document.getElementById('psu-v-input');
+    const vOutEl     = document.getElementById('psu-v-out');
+    const iSlider    = document.getElementById('psu-i-slider');
+    const iInput     = document.getElementById('psu-i-input');
+    const iOutEl     = document.getElementById('psu-i-out');
+    const outOffBtn  = document.getElementById('psu-out-off');
+    const outOnBtn   = document.getElementById('psu-out-on');
+    const slaveInput = document.getElementById('psu-slave-input');
+    const slaveBtn   = document.getElementById('psu-slave-save');
+
+    if (!panelEl) {
+      // HTML not present — defensive no-op so older builds don't crash.
+      return { setRanges() {}, setFromDevice() {} };
+    }
+
+    const send = (msg) => {
+      if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
+    };
+
+    const commitV = () => send({ type: 'set_psu_voltage', v: parseFloat(vInput.value) });
+    const commitI = () => send({ type: 'set_psu_current', i: parseFloat(iInput.value) });
+
+    // Slider drag → mirror to number input live (no send); commit on release/change.
+    vSlider.addEventListener('input',  () => { vInput.value = vSlider.value; });
+    vSlider.addEventListener('change', commitV);
+    vInput .addEventListener('change', () => { vSlider.value = vInput.value; commitV(); });
+
+    iSlider.addEventListener('input',  () => { iInput.value = iSlider.value; });
+    iSlider.addEventListener('change', commitI);
+    iInput .addEventListener('change', () => { iSlider.value = iInput.value; commitI(); });
+
+    outOffBtn.addEventListener('click', () => send({ type: 'set_psu_output', on: false }));
+    outOnBtn .addEventListener('click', () => send({ type: 'set_psu_output', on: true  }));
+
+    slaveBtn.addEventListener('click', () => {
+      const a = parseInt(slaveInput.value, 10);
+      if (!(a >= 1 && a <= 247)) return;
+      send({ type: 'set_psu_slave', addr: a });
+    });
+
+    // Don't yank the slider out from under the user during interaction.
+    let userInteractingV = false, userInteractingI = false;
+    [vSlider, vInput].forEach(el => {
+      el.addEventListener('focus', () => userInteractingV = true);
+      el.addEventListener('blur',  () => userInteractingV = false);
+    });
+    [iSlider, iInput].forEach(el => {
+      el.addEventListener('focus', () => userInteractingI = true);
+      el.addEventListener('blur',  () => userInteractingI = false);
+    });
+
+    return {
+      setRanges(info) {
+        if (typeof info.psu_v_max === 'number') {
+          vSlider.max = info.psu_v_max;
+          vInput.max  = info.psu_v_max;
+        }
+        if (typeof info.psu_i_max === 'number') {
+          iSlider.max = info.psu_i_max;
+          iInput.max  = info.psu_i_max;
+        }
+        if (info.psu_model_name) modelEl.textContent = info.psu_model_name;
+      },
+      setFromDevice(psu) {
+        if (!psu) return;
+        modelEl.textContent  = psu.model || '—';
+        slaveEl.textContent  = (psu.slave != null) ? psu.slave : '—';
+        linkEl.dataset.state = psu.link ? 'up' : 'down';
+        panelEl.classList.toggle('psu-offline', !psu.link);
+        if (!userInteractingV) {
+          vSlider.value = psu.v_set;
+          vInput.value  = psu.v_set;
+        }
+        if (!userInteractingI) {
+          iSlider.value = psu.i_set;
+          iInput.value  = psu.i_set;
+        }
+        vOutEl.textContent = (+psu.v_out).toFixed(2);
+        iOutEl.textContent = (+psu.i_out).toFixed(3);
+        outOnBtn .classList.toggle('active',  psu.output);
+        outOffBtn.classList.toggle('active', !psu.output);
+      },
+    };
+  })();
+
   // ---------- WebSocket dispatch ----------
   ws.addEventListener('message', (ev) => {
     try {
@@ -789,6 +912,7 @@
         if (Array.isArray(msg.gpio)) setGpioFromDevice(msg.gpio);
         if (typeof msg.power === 'number') setPowerFromDevice(msg.power);
         if (typeof msg.pulse_width_ms === 'number') setPulseWidthFromDevice(msg.pulse_width_ms);
+        if (msg.psu) psuPanel.setFromDevice(msg.psu);
       } else if (msg.type === 'ack' && msg.op === 'factory_reset') {
         const fs = document.getElementById('factory_reset_status');
         if (fs) fs.textContent = t('factory_acked');
