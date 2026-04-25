@@ -60,13 +60,19 @@ static esp_err_t device_info_get(httpd_req_t *req)
         return ESP_OK;
     }
 
-    cJSON *pins = cJSON_AddObjectToObject(root, "pins");
+    cJSON *pins     = cJSON_AddObjectToObject(root, "pins");
+    cJSON *defaults = cJSON_AddObjectToObject(root, "defaults");
+    if (!pins || !defaults) {
+        cJSON_Delete(root);
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "oom");
+        return ESP_OK;
+    }
+
     cJSON_AddNumberToObject(pins, "pwm",        CONFIG_APP_PWM_OUTPUT_GPIO);
     cJSON_AddNumberToObject(pins, "trigger",    CONFIG_APP_PWM_TRIGGER_GPIO);
     cJSON_AddNumberToObject(pins, "rpm",        CONFIG_APP_RPM_INPUT_GPIO);
     cJSON_AddNumberToObject(pins, "status_led", CONFIG_APP_STATUS_LED_GPIO);
 
-    cJSON *defaults = cJSON_AddObjectToObject(root, "defaults");
     cJSON_AddNumberToObject(defaults, "pole_count",     CONFIG_APP_DEFAULT_POLE_COUNT);
     cJSON_AddNumberToObject(defaults, "mavg_count",     CONFIG_APP_DEFAULT_MAVG_COUNT);
     cJSON_AddNumberToObject(defaults, "rpm_timeout_us", CONFIG_APP_DEFAULT_RPM_TIMEOUT_US);
