@@ -767,3 +767,47 @@ button.danger[disabled] {
   .gpio-row .gpio-tail  { grid-column: 1 / -1; }
   .gpio-row .gpio-pinnum { grid-column: 2; }
 }
+
+/* ---- Power Supply panel ------------------------------------------------- */
+#psu-panel .psu-meta {
+  font-size: 0.85em;
+  opacity: 0.7;
+  margin-left: 0.5em;
+}
+#psu-panel .psu-link {
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  border-radius: 50%;
+  margin-left: 0.5em;
+  vertical-align: middle;
+}
+#psu-panel .psu-link[data-state="up"]   { background: #2cbf3a; }
+#psu-panel .psu-link[data-state="down"] { background: #c33; }
+#psu-panel .psu-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5em;
+  padding: 0.5em 0;
+}
+#psu-panel .psu-row {
+  display: grid;
+  grid-template-columns: 5em 1fr 6em 1.5em 1fr;
+  align-items: center;
+  gap: 0.5em;
+}
+#psu-panel .psu-row.psu-settings {
+  grid-template-columns: 5em 6em auto 1fr;
+}
+#psu-panel .psu-meas {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+#psu-panel .psu-btn {
+  padding: 0.3em 0.8em;
+  cursor: pointer;
+}
+#psu-panel.psu-offline .psu-body {
+  opacity: 0.4;
+  pointer-events: none;
+}
