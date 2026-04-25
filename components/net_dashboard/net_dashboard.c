@@ -108,17 +108,10 @@ static esp_err_t device_info_get(httpd_req_t *req)
 
     cJSON_AddNumberToObject(root, "psu_baud",       CONFIG_APP_PSU_UART_BAUD);
     cJSON_AddStringToObject(root, "psu_model_name", psu_modbus_get_model_name());
-
-    {
-        psu_modbus_telemetry_t pt;
-        psu_modbus_get_telemetry(&pt);
-        // Slider clamps. Empty/unknown model → conservative defaults (RD6006 6 A).
-        // i_scale_div is 1000.0 for RD6006/6006P, 100.0 for RD6012+.
-        // <1.0 means the model hasn't been detected yet (boot-without-PSU path).
-        float i_max = (pt.i_scale_div >= 999.0f || pt.i_scale_div < 1.0f) ? 6.0f : 24.0f;
-        cJSON_AddNumberToObject(root, "psu_v_max", 60.0);
-        cJSON_AddNumberToObject(root, "psu_i_max", i_max);
-    }
+    cJSON_AddNumberToObject(root, "psu_v_max",      60.0);
+    // Model-aware ceiling (6/12/18/24 A by RD60xx variant). Falls back to 6.0
+    // when MODEL hasn't been detected yet — same conservative pre-detect default.
+    cJSON_AddNumberToObject(root, "psu_i_max",      psu_modbus_get_i_max());
 
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

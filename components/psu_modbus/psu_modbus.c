@@ -41,13 +41,18 @@ static _Atomic uint8_t  s_link_ok;
 static _Atomic uint16_t s_model_id;
 static _Atomic uint32_t s_i_scale_bits;   // float bit-punned, 100.0 or 1000.0
 
-static const struct { uint16_t id; const char *name; float i_scale; } RD_MODELS[] = {
-    { 60062, "RD6006",  1000.0f },
-    { 60065, "RD6006P", 1000.0f },
-    { 60121, "RD6012",   100.0f },
-    { 60125, "RD6012P",  100.0f },
-    { 60181, "RD6018",   100.0f },
-    { 60241, "RD6024",   100.0f },
+static const struct {
+    uint16_t    id;
+    const char *name;
+    float       i_scale;   // raw_register / i_scale = amps
+    float       i_max;     // device current ceiling for slider/clamp
+} RD_MODELS[] = {
+    { 60062, "RD6006",  1000.0f,  6.0f },
+    { 60065, "RD6006P", 1000.0f,  6.0f },
+    { 60121, "RD6012",   100.0f, 12.0f },
+    { 60125, "RD6012P",  100.0f, 12.0f },
+    { 60181, "RD6018",   100.0f, 18.0f },
+    { 60241, "RD6024",   100.0f, 24.0f },
 };
 #define RD_MODELS_N (sizeof(RD_MODELS) / sizeof(RD_MODELS[0]))
 
@@ -267,20 +272,35 @@ static void detect_model(void)
              model, name, (double)scale);
 }
 
+// Called from both psu_task (polling) and control_task (setpoint writes), so
+// the failure counter must be atomic. memory_order_relaxed is fine — the only
+// invariant we need is that the counter monotonically increases on failure
+// and resets to zero on success. The transition log lines may double-fire
+// across concurrent writers in a tight race; that's fine, it's just a log.
+static _Atomic int s_link_fails;
+
 static void note_txn_result(esp_err_t e)
 {
-    static int fails = 0;
     if (e == ESP_OK) {
-        if (fails >= LINK_FAIL_THRESHOLD) {
+        int prev = atomic_exchange_explicit(&s_link_fails, 0, memory_order_relaxed);
+        if (prev >= LINK_FAIL_THRESHOLD) {
             ESP_LOGI(TAG, "link recovered");
         }
-        fails = 0;
         atomic_store_explicit(&s_link_ok, 1, memory_order_relaxed);
     } else {
-        if (fails < LINK_FAIL_THRESHOLD) fails++;
-        if (fails == LINK_FAIL_THRESHOLD) {
-            ESP_LOGW(TAG, "link lost: %s", esp_err_to_name(e));
-            atomic_store_explicit(&s_link_ok, 0, memory_order_relaxed);
+        // CAS-bounded increment: cap the counter at LINK_FAIL_THRESHOLD so it
+        // can't wrap. This also makes the "==threshold" edge fire exactly once.
+        int cur = atomic_load_explicit(&s_link_fails, memory_order_relaxed);
+        while (cur < LINK_FAIL_THRESHOLD) {
+            if (atomic_compare_exchange_weak_explicit(&s_link_fails, &cur, cur + 1,
+                    memory_order_relaxed, memory_order_relaxed)) {
+                if (cur + 1 == LINK_FAIL_THRESHOLD) {
+                    ESP_LOGW(TAG, "link lost: %s", esp_err_to_name(e));
+                    atomic_store_explicit(&s_link_ok, 0, memory_order_relaxed);
+                }
+                break;
+            }
+            // cur was reloaded by the CAS; loop and retry.
         }
     }
 }
@@ -327,6 +347,11 @@ static void psu_task_fn(void *arg)
 
 esp_err_t psu_modbus_init(void)
 {
+    // Create the mutex *first* so any subsequent error path that returns
+    // before the task starts can still be safely re-entered.
+    s_uart_mutex = xSemaphoreCreateMutex();
+    if (!s_uart_mutex) return ESP_ERR_NO_MEM;
+
     load_slave_addr_from_nvs();
 
     const uart_config_t cfg = {
@@ -353,8 +378,6 @@ esp_err_t psu_modbus_init(void)
              CONFIG_APP_PSU_UART_BAUD,
              atomic_load_explicit(&s_slave_addr, memory_order_relaxed));
 
-    s_uart_mutex = xSemaphoreCreateMutex();
-    if (!s_uart_mutex) return ESP_ERR_NO_MEM;
     return ESP_OK;
 }
 esp_err_t psu_modbus_start(void)
@@ -383,7 +406,7 @@ esp_err_t psu_modbus_set_current(float i)
     if (i < 0.0f) i = 0.0f;
     float i_div = load_f(&s_i_scale_bits);
     if (i_div < 1.0f) i_div = 1000.0f;   // before model detect
-    float i_max = (i_div >= 999.0f) ? 6.0f : 24.0f;   // RD6006: 6 A; RD6012/18/24: ≤24 A
+    float i_max = psu_modbus_get_i_max();
     if (i > i_max) i = i_max;
     uint16_t raw = (uint16_t)(i * i_div + 0.5f);
     esp_err_t e = psu_write_single(REG_I_SET, raw);
@@ -441,6 +464,16 @@ const char *psu_modbus_get_model_name(void)
         if (RD_MODELS[i].id == id) return RD_MODELS[i].name;
     }
     return "unknown";
+}
+
+float psu_modbus_get_i_max(void)
+{
+    uint16_t id = atomic_load_explicit(&s_model_id, memory_order_relaxed);
+    for (size_t i = 0; i < RD_MODELS_N; i++) {
+        if (RD_MODELS[i].id == id) return RD_MODELS[i].i_max;
+    }
+    // Conservative default: RD6006 ceiling. Used pre-detect or unknown model.
+    return 6.0f;
 }
 
 // ---- Compile-time CRC sanity ----------------------------------------------

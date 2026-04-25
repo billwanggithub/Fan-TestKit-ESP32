@@ -33,6 +33,7 @@ void psu_modbus_get_telemetry(psu_modbus_telemetry_t *out);
 
 // Convenience for device_info JSON.
 const char *psu_modbus_get_model_name(void);   // "RD6006" | "RD6012" | ... | "unknown"
+float       psu_modbus_get_i_max(void);        // model-aware A; 6.0 if not yet detected
 
 #ifdef __cplusplus
 }
