@@ -23,7 +23,13 @@
       // Help block stays usable with '?' placeholders. Other features unaffected.
     }
   }
-  loadDeviceInfo();
+  // Defer-safe: today the <script> is at end of <body> so the DOM is ready,
+  // but guard against a future move into <head> that would race the queries.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', loadDeviceInfo);
+  } else {
+    loadDeviceInfo();
+  }
 
   const lastSent = { freq: 1000, duty: 0 };
   function sendPwm(freq, duty) {
