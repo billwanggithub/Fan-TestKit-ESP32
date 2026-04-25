@@ -45,6 +45,32 @@ static _Atomic uint32_t s_pulse_width_ms;
 // Per-pin one-shot timer handles; created lazily on first pulse.
 static esp_timer_handle_t s_pulse_timer[GPIO_IO_PIN_COUNT];
 
+// ---- NVS persistence (pulse width only) -----------------------------------
+
+#define NVS_NAMESPACE  "gpio_io"
+#define NVS_KEY_PULSE  "pulse_ms"
+
+static void load_pulse_width_from_nvs(void)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READONLY, &h) != ESP_OK) return;
+    uint32_t v = 0;
+    if (nvs_get_u32(h, NVS_KEY_PULSE, &v) == ESP_OK && v >= 1 && v <= 10000) {
+        atomic_store_explicit(&s_pulse_width_ms, v, memory_order_relaxed);
+        ESP_LOGI(TAG, "pulse width loaded from NVS: %lu ms", (unsigned long)v);
+    }
+    nvs_close(h);
+}
+
+static void save_pulse_width_to_nvs(uint32_t v)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_u32(h, NVS_KEY_PULSE, v);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 static esp_err_t apply_mode_to_hw(uint8_t idx, gpio_io_mode_t mode)
@@ -148,6 +174,7 @@ esp_err_t gpio_io_init(void)
     atomic_store_explicit(&s_pulse_width_ms,
                           CONFIG_APP_DEFAULT_PULSE_WIDTH_MS,
                           memory_order_relaxed);
+    load_pulse_width_from_nvs();
     atomic_store_explicit(&s_power, 0, memory_order_relaxed);
 
     for (int i = 0; i < GPIO_IO_PIN_COUNT; i++) {
@@ -219,6 +246,7 @@ esp_err_t gpio_io_set_pulse_width_ms(uint32_t width_ms)
     if (width_ms < 1)     width_ms = 1;
     if (width_ms > 10000) width_ms = 10000;
     atomic_store_explicit(&s_pulse_width_ms, width_ms, memory_order_relaxed);
+    save_pulse_width_to_nvs(width_ms);
     return ESP_OK;
 }
 
