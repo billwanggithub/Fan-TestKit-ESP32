@@ -173,6 +173,76 @@ static int cmd_power(int argc, char **argv)
     return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
 }
 
+// ---- CLI: psu_v <volts> ----------------------------------------------------
+static struct { struct arg_dbl *v; struct arg_end *end; } s_psu_v_args;
+static int cmd_psu_v(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_psu_v_args);
+    if (n != 0) { arg_print_errors(stderr, s_psu_v_args.end, argv[0]); return 1; }
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_PSU_SET_VOLTAGE,
+        .psu_set_voltage = { .v = (float)s_psu_v_args.v->dval[0] },
+    };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: psu_i <amps> -----------------------------------------------------
+static struct { struct arg_dbl *i; struct arg_end *end; } s_psu_i_args;
+static int cmd_psu_i(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_psu_i_args);
+    if (n != 0) { arg_print_errors(stderr, s_psu_i_args.end, argv[0]); return 1; }
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_PSU_SET_CURRENT,
+        .psu_set_current = { .i = (float)s_psu_i_args.i->dval[0] },
+    };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: psu_out <0|1> ----------------------------------------------------
+static struct { struct arg_int *on; struct arg_end *end; } s_psu_out_args;
+static int cmd_psu_out(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_psu_out_args);
+    if (n != 0) { arg_print_errors(stderr, s_psu_out_args.end, argv[0]); return 1; }
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_PSU_SET_OUTPUT,
+        .psu_set_output = { .on = (uint8_t)(s_psu_out_args.on->ival[0] ? 1 : 0) },
+    };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: psu_slave <addr> -------------------------------------------------
+static struct { struct arg_int *addr; struct arg_end *end; } s_psu_slave_args;
+static int cmd_psu_slave(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_psu_slave_args);
+    if (n != 0) { arg_print_errors(stderr, s_psu_slave_args.end, argv[0]); return 1; }
+    int v = s_psu_slave_args.addr->ival[0];
+    if (v < 1 || v > 247) { printf("addr must be 1..247\n"); return 1; }
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_PSU_SET_SLAVE,
+        .psu_set_slave = { .addr = (uint8_t)v },
+    };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: psu_status -------------------------------------------------------
+static int cmd_psu_status(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    psu_modbus_telemetry_t t;
+    psu_modbus_get_telemetry(&t);
+    printf("psu  %s  %s  v_set=%.2f V  i_set=%.3f A  v_out=%.2f V  i_out=%.3f A  output=%s  slave=%u\n",
+           psu_modbus_get_model_name(),
+           t.link_ok ? "link=up" : "link=down",
+           (double)t.v_set, (double)t.i_set,
+           (double)t.v_out, (double)t.i_out,
+           t.output_on ? "ON" : "OFF",
+           psu_modbus_get_slave_addr());
+    return 0;
+}
+
 // ---- CLI: status -----------------------------------------------------------
 
 static int cmd_status(int argc, char **argv)
@@ -196,6 +266,14 @@ static int cmd_status(int argc, char **argv)
                st[i].level ? 1 : 0, st[i].pulsing ? "*" : "");
     }
     printf("(pulse_width=%lums)\n", (unsigned long)gpio_io_get_pulse_width_ms());
+    psu_modbus_telemetry_t pt;
+    psu_modbus_get_telemetry(&pt);
+    printf("psu  %s  %s  v=%.2f/%.2f V  i=%.3f/%.3f A  out=%s\n",
+           psu_modbus_get_model_name(),
+           pt.link_ok ? "up" : "down",
+           (double)pt.v_set, (double)pt.v_out,
+           (double)pt.i_set, (double)pt.i_out,
+           pt.output_on ? "ON" : "OFF");
     return 0;
 }
 
@@ -253,6 +331,35 @@ static void register_commands(void)
     const esp_console_cmd_t pw_cmd = { .command = "power", .help = "power switch ON/OFF",
         .hint = NULL, .func = cmd_power, .argtable = &s_power_args };
     ESP_ERROR_CHECK(esp_console_cmd_register(&pw_cmd));
+
+    s_psu_v_args.v   = arg_dbl1(NULL, NULL, "<volts>", "voltage in volts (0..60)");
+    s_psu_v_args.end = arg_end(1);
+    const esp_console_cmd_t psu_v_cmd = { .command = "psu_v", .help = "set PSU output voltage",
+        .hint = NULL, .func = cmd_psu_v, .argtable = &s_psu_v_args };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_v_cmd));
+
+    s_psu_i_args.i   = arg_dbl1(NULL, NULL, "<amps>", "current limit in amps");
+    s_psu_i_args.end = arg_end(1);
+    const esp_console_cmd_t psu_i_cmd = { .command = "psu_i", .help = "set PSU current limit",
+        .hint = NULL, .func = cmd_psu_i, .argtable = &s_psu_i_args };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_i_cmd));
+
+    s_psu_out_args.on  = arg_int1(NULL, NULL, "<on>", "1 = ON, 0 = OFF");
+    s_psu_out_args.end = arg_end(1);
+    const esp_console_cmd_t psu_out_cmd = { .command = "psu_out", .help = "PSU output enable",
+        .hint = NULL, .func = cmd_psu_out, .argtable = &s_psu_out_args };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_out_cmd));
+
+    s_psu_slave_args.addr = arg_int1(NULL, NULL, "<addr>", "Modbus slave address 1..247");
+    s_psu_slave_args.end  = arg_end(1);
+    const esp_console_cmd_t psu_slave_cmd = { .command = "psu_slave", .help = "set Modbus slave addr (NVS)",
+        .hint = NULL, .func = cmd_psu_slave, .argtable = &s_psu_slave_args };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_slave_cmd));
+
+    const esp_console_cmd_t psu_status_cmd = { .command = "psu_status",
+        .help = "print PSU snapshot (v_set/i_set/v_out/i_out/link/model)",
+        .hint = NULL, .func = cmd_psu_status };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_status_cmd));
 
     const esp_console_cmd_t st_cmd = {
         .command = "status", .help = "print PWM + RPM snapshot",
