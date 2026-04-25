@@ -140,9 +140,34 @@ esp_err_t gpio_io_set_pulse_width_ms(uint32_t width_ms)
     return ESP_OK;
 }
 
-// remaining stubs (set_mode/set_level/pulse/set_power/get_power) stay until
-// the next tasks fill them in.
-esp_err_t gpio_io_set_mode (uint8_t idx, gpio_io_mode_t mode)  { (void)idx; (void)mode;  return ESP_ERR_NOT_SUPPORTED; }
+// remaining stubs (set_level/pulse/set_power/get_power) stay until the
+// next tasks fill them in. Single-writer invariant: every gpio_io_set_*
+// and gpio_io_pulse call is funnelled through control_task, so loads of
+// s_state[] in this file see no concurrent writers. Pulse end-callback
+// only clears pulsing — never starts a new pulse.
+esp_err_t gpio_io_set_mode(uint8_t idx, gpio_io_mode_t mode)
+{
+    if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
+    if (mode > GPIO_IO_MODE_OUTPUT) return ESP_ERR_INVALID_ARG;
+
+    // Reject mode change while a pulse is in flight on this pin.
+    uint8_t cur = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_PULSING(cur)) return ESP_ERR_INVALID_STATE;
+
+    esp_err_t e = apply_mode_to_hw(idx, mode);
+    if (e != ESP_OK) return e;
+
+    bool level = 0;
+    if (mode == GPIO_IO_MODE_OUTPUT) {
+        // Preserve the previously driven level if we were already output;
+        // otherwise default to 0.
+        level = (STATE_MODE(cur) == GPIO_IO_MODE_OUTPUT) ? STATE_LEVEL(cur) : 0;
+        gpio_set_level(s_pins[idx], level);
+    }
+    atomic_store_explicit(&s_state[idx], MAKE_STATE(mode, level, 0),
+                          memory_order_relaxed);
+    return ESP_OK;
+}
 esp_err_t gpio_io_set_level(uint8_t idx, bool level)           { (void)idx; (void)level; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t gpio_io_pulse    (uint8_t idx, uint32_t width_ms)    { (void)idx; (void)width_ms; return ESP_ERR_NOT_SUPPORTED; }
 esp_err_t gpio_io_set_power(bool on)                            { (void)on; return ESP_ERR_NOT_SUPPORTED; }
