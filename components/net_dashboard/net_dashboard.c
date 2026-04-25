@@ -10,6 +10,7 @@
 #include "prov_internal.h"
 #include "cJSON.h"
 #include "pwm_gen.h"
+#include "psu_modbus.h"
 #include "sdkconfig.h"
 
 esp_err_t provisioning_run_and_connect(void);
@@ -73,6 +74,8 @@ static esp_err_t device_info_get(httpd_req_t *req)
     cJSON_AddNumberToObject(pins, "rpm",        CONFIG_APP_RPM_INPUT_GPIO);
     cJSON_AddNumberToObject(pins, "status_led", CONFIG_APP_STATUS_LED_GPIO);
     cJSON_AddNumberToObject(pins, "power_switch", CONFIG_APP_POWER_SWITCH_GPIO);
+    cJSON_AddNumberToObject(pins, "psu_uart_tx", CONFIG_APP_PSU_UART_TX_GPIO);
+    cJSON_AddNumberToObject(pins, "psu_uart_rx", CONFIG_APP_PSU_UART_RX_GPIO);
     cJSON *gpio_a = cJSON_AddArrayToObject(pins, "group_a");
     cJSON *gpio_b = cJSON_AddArrayToObject(pins, "group_b");
     if (gpio_a) {
@@ -102,6 +105,20 @@ static esp_err_t device_info_get(httpd_req_t *req)
 
     cJSON_AddNumberToObject(root, "freq_hz_min", PWM_GEN_FREQ_MIN_HZ);
     cJSON_AddNumberToObject(root, "freq_hz_max", PWM_GEN_FREQ_MAX_HZ);
+
+    cJSON_AddNumberToObject(root, "psu_baud",       CONFIG_APP_PSU_UART_BAUD);
+    cJSON_AddStringToObject(root, "psu_model_name", psu_modbus_get_model_name());
+
+    {
+        psu_modbus_telemetry_t pt;
+        psu_modbus_get_telemetry(&pt);
+        // Slider clamps. Empty/unknown model → conservative defaults (RD6006 6 A).
+        // i_scale_div is 1000.0 for RD6006/6006P, 100.0 for RD6012+.
+        // <1.0 means the model hasn't been detected yet (boot-without-PSU path).
+        float i_max = (pt.i_scale_div >= 999.0f || pt.i_scale_div < 1.0f) ? 6.0f : 24.0f;
+        cJSON_AddNumberToObject(root, "psu_v_max", 60.0);
+        cJSON_AddNumberToObject(root, "psu_i_max", i_max);
+    }
 
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
