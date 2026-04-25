@@ -11,7 +11,7 @@
 
 #include "app_api.h"
 #include "gpio_io.h"
-#include "psu_modbus.h"
+#include "psu_driver.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "net_dashboard.h"
@@ -240,8 +240,8 @@ static void telemetry_task(void *arg)
             n += snprintf(payload + n, sizeof(payload) - n, "]");
         }
 
-        psu_modbus_telemetry_t pt;
-        psu_modbus_get_telemetry(&pt);
+        psu_driver_telemetry_t pt;
+        psu_driver_get_telemetry(&pt);
         if (n < (int)sizeof(payload)) {
             n += snprintf(payload + n, sizeof(payload) - n,
                 ",\"psu\":{\"v_set\":%.2f,\"i_set\":%.3f,\"v_out\":%.2f,\"i_out\":%.3f,"
@@ -250,8 +250,8 @@ static void telemetry_task(void *arg)
                 (double)pt.v_out, (double)pt.i_out,
                 pt.output_on ? "true" : "false",
                 pt.link_ok   ? "true" : "false",
-                psu_modbus_get_model_name(),
-                psu_modbus_get_slave_addr());
+                psu_driver_get_model_name(),
+                psu_driver_get_slave_addr());
         }
         if (n < (int)sizeof(payload)) {
             n += snprintf(payload + n, sizeof(payload) - n, "}");

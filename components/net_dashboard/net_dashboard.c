@@ -10,7 +10,7 @@
 #include "prov_internal.h"
 #include "cJSON.h"
 #include "pwm_gen.h"
-#include "psu_modbus.h"
+#include "psu_driver.h"
 #include "sdkconfig.h"
 
 esp_err_t provisioning_run_and_connect(void);
@@ -107,11 +107,11 @@ static esp_err_t device_info_get(httpd_req_t *req)
     cJSON_AddNumberToObject(root, "freq_hz_max", PWM_GEN_FREQ_MAX_HZ);
 
     cJSON_AddNumberToObject(root, "psu_baud",       CONFIG_APP_PSU_UART_BAUD);
-    cJSON_AddStringToObject(root, "psu_model_name", psu_modbus_get_model_name());
+    cJSON_AddStringToObject(root, "psu_model_name", psu_driver_get_model_name());
     cJSON_AddNumberToObject(root, "psu_v_max",      60.0);
     // Model-aware ceiling (6/12/18/24 A by RD60xx variant). Falls back to 6.0
     // when MODEL hasn't been detected yet — same conservative pre-detect default.
-    cJSON_AddNumberToObject(root, "psu_i_max",      psu_modbus_get_i_max());
+    cJSON_AddNumberToObject(root, "psu_i_max",      psu_driver_get_i_max());
 
     char *body = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);

@@ -18,7 +18,7 @@ idf_component_register(
                 # share one restart path.
                 net_dashboard
                 gpio_io
-                psu_modbus
+                psu_driver
                 # v6.0: freertos/ringbuf.h moved out of freertos transitive
                 # closure; usb_cdc_task.c uses RingbufHandle_t for SLIP frame
                 # buffering, so explicit dep is now required.

@@ -13,7 +13,7 @@
 
 #include "sdkconfig.h"
 #include "gpio_io.h"
-#include "psu_modbus.h"
+#include "psu_driver.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "app_api.h"
@@ -231,15 +231,15 @@ static int cmd_psu_slave(int argc, char **argv)
 static int cmd_psu_status(int argc, char **argv)
 {
     (void)argc; (void)argv;
-    psu_modbus_telemetry_t t;
-    psu_modbus_get_telemetry(&t);
+    psu_driver_telemetry_t t;
+    psu_driver_get_telemetry(&t);
     printf("psu  %s  %s  v_set=%.2f V  i_set=%.3f A  v_out=%.2f V  i_out=%.3f A  output=%s  slave=%u\n",
-           psu_modbus_get_model_name(),
+           psu_driver_get_model_name(),
            t.link_ok ? "link=up" : "link=down",
            (double)t.v_set, (double)t.i_set,
            (double)t.v_out, (double)t.i_out,
            t.output_on ? "ON" : "OFF",
-           psu_modbus_get_slave_addr());
+           psu_driver_get_slave_addr());
     return 0;
 }
 
@@ -266,10 +266,10 @@ static int cmd_status(int argc, char **argv)
                st[i].level ? 1 : 0, st[i].pulsing ? "*" : "");
     }
     printf("(pulse_width=%lums)\n", (unsigned long)gpio_io_get_pulse_width_ms());
-    psu_modbus_telemetry_t pt;
-    psu_modbus_get_telemetry(&pt);
+    psu_driver_telemetry_t pt;
+    psu_driver_get_telemetry(&pt);
     printf("psu  %s  %s  v=%.2f/%.2f V  i=%.3f/%.3f A  out=%s\n",
-           psu_modbus_get_model_name(),
+           psu_driver_get_model_name(),
            pt.link_ok ? "up" : "down",
            (double)pt.v_set, (double)pt.v_out,
            (double)pt.i_set, (double)pt.i_out,
@@ -411,11 +411,11 @@ void app_main(void)
     ESP_ERROR_CHECK(rpm_cap_init(&rpm_cfg));
 
     ESP_ERROR_CHECK(gpio_io_init());
-    ESP_ERROR_CHECK(psu_modbus_init());
+    ESP_ERROR_CHECK(psu_driver_init());
 
     ESP_ERROR_CHECK(ota_core_init());
     ESP_ERROR_CHECK(control_task_start());
-    ESP_ERROR_CHECK(psu_modbus_start());
+    ESP_ERROR_CHECK(psu_driver_start());
 
     // Drive the default setpoint through the same path every later command
     // uses (pwm_gen_set → publish_pwm). This makes the published atomics, the

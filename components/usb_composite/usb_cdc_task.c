@@ -15,7 +15,7 @@
 #include "usb_protocol.h"
 #include "app_api.h"
 #include "gpio_io.h"
-#include "psu_modbus.h"
+#include "psu_driver.h"
 #include "ota_core.h"
 #include "net_dashboard.h"
 
@@ -299,8 +299,8 @@ static void cdc_psu_telemetry_task(void *arg)
         vTaskDelayUntil(&last, period);
         if (!tud_cdc_connected()) continue;
 
-        psu_modbus_telemetry_t pt;
-        psu_modbus_get_telemetry(&pt);
+        psu_driver_telemetry_t pt;
+        psu_driver_get_telemetry(&pt);
 
         // Frame body: [op][v_set LE][i_set LE][v_out LE][i_out LE][flags]
         // 17 payload bytes (4×float + 1×u8). Op byte adds 1 = 18 byte body.

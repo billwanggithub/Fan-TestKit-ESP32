@@ -9,7 +9,7 @@ idf_component_register(
                 net_dashboard
                 ota_core
                 gpio_io
-                psu_modbus
+                psu_driver
                 esp_event
                 esp_timer
                 console
