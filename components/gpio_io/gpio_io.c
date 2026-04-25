@@ -42,9 +42,7 @@ static _Atomic uint8_t s_state[GPIO_IO_PIN_COUNT];
 static _Atomic uint8_t  s_power;
 static _Atomic uint32_t s_pulse_width_ms;
 
-// Per-pin one-shot timer handles; created lazily in gpio_io_pulse (Task 7).
-// Declared now to keep the file shape stable across tasks.
-__attribute__((unused))
+// Per-pin one-shot timer handles; created lazily on first pulse.
 static esp_timer_handle_t s_pulse_timer[GPIO_IO_PIN_COUNT];
 
 // ---- helpers ---------------------------------------------------------------
@@ -111,6 +109,29 @@ static void gpio_io_poll_task(void *arg)
     }
 }
 
+// ---- pulse end-callback ----------------------------------------------------
+
+// Runs on the esp_timer task. The pulse-arm path stores level=idle into the
+// state word *before* arming the timer, so this callback only needs to drive
+// the pin back to the published level and clear the pulsing bit. Single
+// concurrent writer to s_state[idx] vs. the poll task — but the poll task
+// skips OUTPUT pins, so no collision.
+static void pulse_done_cb(void *arg)
+{
+    uintptr_t idx_u = (uintptr_t)arg;
+    uint8_t idx = (uint8_t)idx_u;
+    if (idx >= GPIO_IO_PIN_COUNT) return;
+
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_MODE(s) != GPIO_IO_MODE_OUTPUT) return;
+
+    bool restore = STATE_LEVEL(s);
+    gpio_set_level(s_pins[idx], restore ? 1 : 0);
+    atomic_store_explicit(&s_state[idx],
+                          MAKE_STATE(GPIO_IO_MODE_OUTPUT, restore ? 1 : 0, 0),
+                          memory_order_relaxed);
+}
+
 // ---- public API ------------------------------------------------------------
 
 esp_err_t gpio_io_init(void)
@@ -174,11 +195,11 @@ esp_err_t gpio_io_set_pulse_width_ms(uint32_t width_ms)
     return ESP_OK;
 }
 
-// remaining stubs (pulse/set_power/get_power) stay until the next tasks
-// fill them in. Single-writer invariant: every gpio_io_set_* and
-// gpio_io_pulse call is funnelled through control_task, so loads of
-// s_state[] in this file see no concurrent writers. Pulse end-callback
-// only clears pulsing — never starts a new pulse.
+// remaining stubs (set_power/get_power) stay until Task 8 fills them
+// in. Single-writer invariant: every gpio_io_set_* and gpio_io_pulse
+// call is funnelled through control_task, so loads of s_state[] in
+// this file see no concurrent writers. Pulse end-callback only writes
+// OUTPUT-mode pins (which the poll task skips) so no collision there.
 esp_err_t gpio_io_set_mode(uint8_t idx, gpio_io_mode_t mode)
 {
     if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
@@ -215,6 +236,51 @@ esp_err_t gpio_io_set_level(uint8_t idx, bool level)
                           memory_order_relaxed);
     return ESP_OK;
 }
-esp_err_t gpio_io_pulse    (uint8_t idx, uint32_t width_ms)    { (void)idx; (void)width_ms; return ESP_ERR_NOT_SUPPORTED; }
+esp_err_t gpio_io_pulse(uint8_t idx, uint32_t width_ms)
+{
+    if (idx >= GPIO_IO_PIN_COUNT) return ESP_ERR_INVALID_ARG;
+
+    uint8_t s = atomic_load_explicit(&s_state[idx], memory_order_relaxed);
+    if (STATE_MODE(s) != GPIO_IO_MODE_OUTPUT) return ESP_ERR_INVALID_STATE;
+    if (STATE_PULSING(s))                     return ESP_ERR_INVALID_STATE;
+
+    if (width_ms < 1)     width_ms = 1;
+    if (width_ms > 10000) width_ms = 10000;
+
+    if (!s_pulse_timer[idx]) {
+        const esp_timer_create_args_t args = {
+            .callback        = pulse_done_cb,
+            .arg             = (void *)(uintptr_t)idx,
+            .dispatch_method = ESP_TIMER_TASK,
+            .name            = "gpio_io_pulse",
+        };
+        esp_err_t ce = esp_timer_create(&args, &s_pulse_timer[idx]);
+        if (ce != ESP_OK) return ce;
+    }
+
+    bool idle  = STATE_LEVEL(s);
+    bool burst = !idle;
+    gpio_set_level(s_pins[idx], burst ? 1 : 0);
+    // Mark pulsing BEFORE arming the timer so the callback can never see
+    // pulsing=false (which would short-circuit the restore). Note that the
+    // *level* bit we publish is the idle level, not the burst level —
+    // pulse_done_cb reads STATE_LEVEL to know what to restore to.
+    atomic_store_explicit(&s_state[idx],
+                          MAKE_STATE(GPIO_IO_MODE_OUTPUT, idle ? 1 : 0, 1),
+                          memory_order_relaxed);
+
+    esp_err_t te = esp_timer_start_once(s_pulse_timer[idx], (uint64_t)width_ms * 1000);
+    if (te != ESP_OK) {
+        // Synchronous restore on the failure path so the pin is never left
+        // mid-pulse. Caller sees the error; next telemetry frame shows
+        // pulsing=false.
+        gpio_set_level(s_pins[idx], idle ? 1 : 0);
+        atomic_store_explicit(&s_state[idx],
+                              MAKE_STATE(GPIO_IO_MODE_OUTPUT, idle ? 1 : 0, 0),
+                              memory_order_relaxed);
+        return te;
+    }
+    return ESP_OK;
+}
 esp_err_t gpio_io_set_power(bool on)                            { (void)on; return ESP_ERR_NOT_SUPPORTED; }
 bool      gpio_io_get_power(void)                               { return false; }
