@@ -76,7 +76,14 @@ REG_I_OUT  = 0x000B
 REG_OUTPUT = 0x0012
 ```
 
-Default UART: 19200-8N1. Slave addr range 1..247.
+Default UART: **115200**-8N1 (Riden RD60xx factory default; the unit's
+panel menu P-08 lets the user change it). The current project's
+`CONFIG_APP_PSU_UART_BAUD=19200` predates this spec — it was set to
+match a bench unit that had been re-keyed to 19200 via the panel. Per
+this spec, the Kconfig default is reset to the factory value (115200);
+operators using a bench unit still keyed to 19200 must either reset
+the supply's panel baud or override `APP_PSU_UART_BAUD` per-build.
+Slave addr range 1..247.
 
 ### XY-SK120 (new, Modbus-RTU)
 
@@ -311,11 +318,18 @@ config APP_PSU_DEFAULT_FAMILY_WZ5005
 endchoice
 
 # (changed)
+# Each family's default tracks the PSU's factory-shipped baud:
+#   Riden RD60xx     → 115200 (factory)
+#   XY-SK120         → 115200 (factory)
+#   WZ5005           →  19200 (factory; manual lists 19200 as the default
+#                              of the supported set 9600/19200/38400/57600/115200)
+# If the bench unit's panel has been re-keyed, the operator overrides
+# this per-build (idf.py menuconfig → APP_PSU_UART_BAUD).
 config APP_PSU_UART_BAUD
     int "UART1 baud (matches the PSU's panel-set rate)"
-    default 19200 if APP_PSU_DEFAULT_FAMILY_RIDEN
+    default 115200 if APP_PSU_DEFAULT_FAMILY_RIDEN
     default 115200 if APP_PSU_DEFAULT_FAMILY_XY_SK120
-    default 19200 if APP_PSU_DEFAULT_FAMILY_WZ5005
+    default 19200  if APP_PSU_DEFAULT_FAMILY_WZ5005
 ```
 
 Note: the baud is a **defaults-only** Kconfig — the runtime
