@@ -17,6 +17,7 @@ idf_component_register(
                 # Keeps the reprovision flow in a single place so all three transports
                 # share one restart path.
                 net_dashboard
+                gpio_io
                 # v6.0: freertos/ringbuf.h moved out of freertos transitive
                 # closure; usb_cdc_task.c uses RingbufHandle_t for SLIP frame
                 # buffering, so explicit dep is now required.

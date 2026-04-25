@@ -10,6 +10,7 @@
 
 #include "usb_protocol.h"
 #include "app_api.h"
+#include "gpio_io.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "net_dashboard.h"
@@ -63,6 +64,44 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
         }
         ESP_LOGW(TAG, "factory_reset requested via HID");
         net_dashboard_factory_reset();
+    } break;
+    case USB_HID_REPORT_GPIO: {
+        if (bufsize < 4) return;
+        uint8_t op = buffer[0];
+        switch (op) {
+        case USB_HID_GPIO_OP_SET_MODE: {
+            ctrl_cmd_t c = {
+                .kind = CTRL_CMD_GPIO_SET_MODE,
+                .gpio_set_mode = { .idx = buffer[1], .mode = buffer[2] },
+            };
+            control_task_post(&c, 0);
+        } break;
+        case USB_HID_GPIO_OP_SET_LEVEL: {
+            ctrl_cmd_t c = {
+                .kind = CTRL_CMD_GPIO_SET_LEVEL,
+                .gpio_set_level = { .idx = buffer[1], .level = buffer[2] ? 1u : 0u },
+            };
+            control_task_post(&c, 0);
+        } break;
+        case USB_HID_GPIO_OP_PULSE: {
+            uint16_t width = (uint16_t)buffer[2] | ((uint16_t)buffer[3] << 8);
+            ctrl_cmd_t c = {
+                .kind = CTRL_CMD_GPIO_PULSE,
+                .gpio_pulse = { .idx = buffer[1], .width_ms = width },
+            };
+            control_task_post(&c, 0);
+        } break;
+        case USB_HID_GPIO_OP_POWER: {
+            ctrl_cmd_t c = {
+                .kind = CTRL_CMD_POWER_SET,
+                .power_set = { .on = buffer[1] ? 1u : 0u },
+            };
+            control_task_post(&c, 0);
+        } break;
+        default:
+            ESP_LOGW(TAG, "unknown gpio op 0x%02x", op);
+            break;
+        }
     } break;
     default:
         ESP_LOGW(TAG, "unknown OUT report id 0x%02x", report_id);
