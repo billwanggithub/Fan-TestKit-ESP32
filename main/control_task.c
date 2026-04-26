@@ -9,6 +9,7 @@
 #include "freertos/queue.h"
 
 #include "gpio_io.h"
+#include "ip_announcer.h"
 #include "psu_driver.h"
 #include "pwm_gen.h"
 #include "rpm_cap.h"
@@ -145,6 +146,34 @@ static void control_task(void *arg)
             if (e != ESP_OK) {
                 ESP_LOGW(TAG, "psu_set_slave(%u) failed: %s",
                          cmd.psu_set_slave.addr, esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_ANNOUNCER_SET: {
+            ip_announcer_settings_t s = {
+                .enable   = (cmd.announcer_set.enable != 0),
+                .priority = cmd.announcer_set.priority,
+            };
+            // memcpy + explicit NUL avoids -Werror=stringop-truncation when
+            // src and dst are the same fixed-size char[] (v6.0 toolchain).
+            memcpy(s.topic,  cmd.announcer_set.topic,  sizeof(s.topic) - 1);
+            s.topic[sizeof(s.topic) - 1] = '\0';
+            memcpy(s.server, cmd.announcer_set.server, sizeof(s.server) - 1);
+            s.server[sizeof(s.server) - 1] = '\0';
+            esp_err_t e = ip_announcer_set_settings(&s);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "announcer_set failed: %s", esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_ANNOUNCER_TEST: {
+            esp_err_t e = ip_announcer_test_push();
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "announcer_test failed: %s", esp_err_to_name(e));
+            }
+        } break;
+        case CTRL_CMD_ANNOUNCER_ENABLE: {
+            esp_err_t e = ip_announcer_set_enable(cmd.announcer_enable.enable != 0);
+            if (e != ESP_OK) {
+                ESP_LOGW(TAG, "announcer_enable failed: %s", esp_err_to_name(e));
             }
         } break;
         }
