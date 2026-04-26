@@ -1,0 +1,219 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE eagle
+  SYSTEM 'eagle.dtd'>
+<eagle version="9.6.2">
+ <drawing>
+  <settings alwaysvectorfont="no" verticaltext="up"/>
+  <grid distance="0.1" unitdist="inch" unit="inch" style="lines" multiple="1" display="no" altdistance="0.01" altunitdist="inch" altunit="inch"/>
+  <layers>
+   <layer number="1" name="Top" color="4" fill="1" visible="yes" active="yes"/>
+   <layer number="16" name="Bottom" color="1" fill="1" visible="yes" active="yes"/>
+   <layer number="17" name="Pads" color="2" fill="1" visible="yes" active="yes"/>
+   <layer number="18" name="Vias" color="2" fill="1" visible="yes" active="yes"/>
+   <layer number="19" name="Unrouted" color="6" fill="1" visible="yes" active="yes"/>
+   <layer number="20" name="Dimension" color="15" fill="1" visible="yes" active="yes"/>
+   <layer number="21" name="tPlace" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="22" name="bPlace" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="25" name="tNames" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="26" name="bNames" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="27" name="tValues" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="28" name="bValues" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="29" name="tStop" color="7" fill="3" visible="yes" active="yes"/>
+   <layer number="30" name="bStop" color="7" fill="6" visible="yes" active="yes"/>
+   <layer number="39" name="tKeepout" color="4" fill="11" visible="yes" active="yes"/>
+   <layer number="40" name="bKeepout" color="1" fill="11" visible="yes" active="yes"/>
+   <layer number="41" name="tRestrict" color="4" fill="10" visible="yes" active="yes"/>
+   <layer number="42" name="bRestrict" color="1" fill="10" visible="yes" active="yes"/>
+   <layer number="43" name="vRestrict" color="2" fill="10" visible="yes" active="yes"/>
+   <layer number="44" name="Drills" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="45" name="Holes" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="51" name="tDocu" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="52" name="bDocu" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="94" name="Symbols" color="4" fill="1" visible="yes" active="yes"/>
+   <layer number="95" name="Names" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="96" name="Values" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="97" name="Info" color="7" fill="1" visible="yes" active="yes"/>
+   <layer number="98" name="Guide" color="6" fill="1" visible="yes" active="yes"/>
+  </layers>
+  <library>
+   <description>YD-ESP32-S3-COREBOARD V1.4 ESP32-S3-WROOM-1 (N16R8) dev board.&amp;#13;44-pin breakout: 2x 22-pin headers on 25.40 mm row spacing, 2.54 mm pitch.&amp;#13;USB1=CH343P UART0 console; USB2=native USB (HID/CDC); WS2812 RGB on GPIO48.</description>
+   <packages>
+    <package name="YD-ESP32-S3-COREBOARD">
+     <description>YD-ESP32-S3-COREBOARD V1.4 land pattern.&amp;#13;2x22 THT, 25.40 mm row spacing, 2.54 mm pitch, 1.0 mm drill, 1.8 mm pad.</description>
+     <pad name="1" x="-12.7000" y="26.6700" drill="1.0000" diameter="1.8000" shape="square" rot="R0" thermals="no"/>
+     <pad name="2" x="-12.7000" y="24.1300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="3" x="-12.7000" y="21.5900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="4" x="-12.7000" y="19.0500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="5" x="-12.7000" y="16.5100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="6" x="-12.7000" y="13.9700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="7" x="-12.7000" y="11.4300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="8" x="-12.7000" y="8.8900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="9" x="-12.7000" y="6.3500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="10" x="-12.7000" y="3.8100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="11" x="-12.7000" y="1.2700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="12" x="-12.7000" y="-1.2700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="13" x="-12.7000" y="-3.8100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="14" x="-12.7000" y="-6.3500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="15" x="-12.7000" y="-8.8900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="16" x="-12.7000" y="-11.4300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="17" x="-12.7000" y="-13.9700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="18" x="-12.7000" y="-16.5100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="19" x="-12.7000" y="-19.0500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="20" x="-12.7000" y="-21.5900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="21" x="-12.7000" y="-24.1300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="22" x="-12.7000" y="-26.6700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="23" x="12.7000" y="26.6700" drill="1.0000" diameter="1.8000" shape="square" rot="R0" thermals="no"/>
+     <pad name="24" x="12.7000" y="24.1300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="25" x="12.7000" y="21.5900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="26" x="12.7000" y="19.0500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="27" x="12.7000" y="16.5100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="28" x="12.7000" y="13.9700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="29" x="12.7000" y="11.4300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="30" x="12.7000" y="8.8900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="31" x="12.7000" y="6.3500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="32" x="12.7000" y="3.8100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="33" x="12.7000" y="1.2700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="34" x="12.7000" y="-1.2700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="35" x="12.7000" y="-3.8100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="36" x="12.7000" y="-6.3500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="37" x="12.7000" y="-8.8900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="38" x="12.7000" y="-11.4300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="39" x="12.7000" y="-13.9700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="40" x="12.7000" y="-16.5100" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="41" x="12.7000" y="-19.0500" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="42" x="12.7000" y="-21.5900" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="43" x="12.7000" y="-24.1300" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <pad name="44" x="12.7000" y="-26.6700" drill="1.0000" diameter="1.8000" shape="round" rot="R0" thermals="no"/>
+     <wire x1="-13.4700" y1="-31.1950" x2="13.4700" y2="-31.1950" width="0.1270" layer="21"/>
+     <wire x1="13.4700" y1="-31.1950" x2="13.4700" y2="31.1950" width="0.1270" layer="21"/>
+     <wire x1="13.4700" y1="31.1950" x2="-13.4700" y2="31.1950" width="0.1270" layer="21"/>
+     <wire x1="-13.4700" y1="31.1950" x2="-13.4700" y2="-31.1950" width="0.1270" layer="21"/>
+     <wire x1="-13.9700" y1="-31.6950" x2="13.9700" y2="-31.6950" width="0.1000" layer="51"/>
+     <wire x1="13.9700" y1="-31.6950" x2="13.9700" y2="31.6950" width="0.1000" layer="51"/>
+     <wire x1="13.9700" y1="31.6950" x2="-13.9700" y2="31.6950" width="0.1000" layer="51"/>
+     <wire x1="-13.9700" y1="31.6950" x2="-13.9700" y2="-31.6950" width="0.1000" layer="51"/>
+     <rectangle x1="-13.9700" y1="-31.6950" x2="13.9700" y2="31.6950" layer="39"/>
+     <wire x1="-14.5000" y1="25.7700" x2="-14.5000" y2="27.5700" width="0.2000" layer="21"/>
+     <text x="0.0000" y="33.1950" size="1.2000" layer="25" align="center">&gt;NAME</text>
+     <text x="0.0000" y="-33.1950" size="1.0000" layer="27" align="center">&gt;VALUE</text>
+    </package>
+   </packages>
+   <symbols>
+    <symbol name="YD-ESP32-S3-COREBOARD">
+     <description>YD-ESP32-S3-COREBOARD V1.4 schematic symbol (44 pins, J1=1..22, J2=23..44).</description>
+     <wire x1="-15.2400" y1="30.4800" x2="15.2400" y2="30.4800" width="0.254" layer="94"/>
+     <wire x1="15.2400" y1="30.4800" x2="15.2400" y2="-30.4800" width="0.254" layer="94"/>
+     <wire x1="15.2400" y1="-30.4800" x2="-15.2400" y2="-30.4800" width="0.254" layer="94"/>
+     <wire x1="-15.2400" y1="-30.4800" x2="-15.2400" y2="30.4800" width="0.254" layer="94"/>
+     <text x="-15.2400" y="31.4800" size="1.778" layer="95">&gt;NAME</text>
+     <text x="15.2400" y="31.4800" size="1.778" layer="96" align="bottom-right">&gt;VALUE</text>
+     <pin name="3V3@1" x="-20.3200" y="26.6700" length="middle" direction="pwr" visible="both" rot="R0"/>
+     <pin name="3V3@2" x="-20.3200" y="24.1300" length="middle" direction="pwr" visible="both" rot="R0"/>
+     <pin name="EN" x="-20.3200" y="21.5900" length="middle" direction="in" visible="both" rot="R0"/>
+     <pin name="GPIO4" x="-20.3200" y="19.0500" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO5" x="-20.3200" y="16.5100" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO6" x="-20.3200" y="13.9700" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO7" x="-20.3200" y="11.4300" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO15" x="-20.3200" y="8.8900" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO16" x="-20.3200" y="6.3500" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO17" x="-20.3200" y="3.8100" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO18" x="-20.3200" y="1.2700" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO8" x="-20.3200" y="-1.2700" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO3" x="-20.3200" y="-3.8100" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO46" x="-20.3200" y="-6.3500" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO9" x="-20.3200" y="-8.8900" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO10" x="-20.3200" y="-11.4300" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO11" x="-20.3200" y="-13.9700" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO12" x="-20.3200" y="-16.5100" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO13" x="-20.3200" y="-19.0500" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="GPIO14" x="-20.3200" y="-21.5900" length="middle" direction="io" visible="both" rot="R0"/>
+     <pin name="5V" x="-20.3200" y="-24.1300" length="middle" direction="pwr" visible="both" rot="R0"/>
+     <pin name="GND@1" x="-20.3200" y="-26.6700" length="middle" direction="pwr" visible="both" rot="R0"/>
+     <pin name="GND@2" x="20.3200" y="26.6700" length="middle" direction="pwr" visible="both" rot="R180"/>
+     <pin name="U0TXD" x="20.3200" y="24.1300" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="U0RXD" x="20.3200" y="21.5900" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO1" x="20.3200" y="19.0500" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO2" x="20.3200" y="16.5100" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO42" x="20.3200" y="13.9700" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO41" x="20.3200" y="11.4300" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO40" x="20.3200" y="8.8900" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO39" x="20.3200" y="6.3500" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO38" x="20.3200" y="3.8100" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO37" x="20.3200" y="1.2700" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO36" x="20.3200" y="-1.2700" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO35" x="20.3200" y="-3.8100" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO0" x="20.3200" y="-6.3500" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO45" x="20.3200" y="-8.8900" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO48" x="20.3200" y="-11.4300" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO47" x="20.3200" y="-13.9700" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO21" x="20.3200" y="-16.5100" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO20" x="20.3200" y="-19.0500" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GPIO19" x="20.3200" y="-21.5900" length="middle" direction="io" visible="both" rot="R180"/>
+     <pin name="GND@3" x="20.3200" y="-24.1300" length="middle" direction="pwr" visible="both" rot="R180"/>
+     <pin name="GND@4" x="20.3200" y="-26.6700" length="middle" direction="pwr" visible="both" rot="R180"/>
+    </symbol>
+   </symbols>
+   <devicesets>
+    <deviceset name="YD-ESP32-S3-COREBOARD" prefix="U" uservalue="no">
+     <description>YD-ESP32-S3-COREBOARD V1.4 dev board (ESP32-S3-WROOM-1 N16R8).</description>
+     <gates>
+      <gate name="G$1" symbol="YD-ESP32-S3-COREBOARD" x="0" y="0"/>
+     </gates>
+     <devices>
+      <device name="" package="YD-ESP32-S3-COREBOARD">
+       <connects>
+        <connect gate="G$1" pin="3V3@1" pad="1"/>
+        <connect gate="G$1" pin="3V3@2" pad="2"/>
+        <connect gate="G$1" pin="EN" pad="3"/>
+        <connect gate="G$1" pin="GPIO4" pad="4"/>
+        <connect gate="G$1" pin="GPIO5" pad="5"/>
+        <connect gate="G$1" pin="GPIO6" pad="6"/>
+        <connect gate="G$1" pin="GPIO7" pad="7"/>
+        <connect gate="G$1" pin="GPIO15" pad="8"/>
+        <connect gate="G$1" pin="GPIO16" pad="9"/>
+        <connect gate="G$1" pin="GPIO17" pad="10"/>
+        <connect gate="G$1" pin="GPIO18" pad="11"/>
+        <connect gate="G$1" pin="GPIO8" pad="12"/>
+        <connect gate="G$1" pin="GPIO3" pad="13"/>
+        <connect gate="G$1" pin="GPIO46" pad="14"/>
+        <connect gate="G$1" pin="GPIO9" pad="15"/>
+        <connect gate="G$1" pin="GPIO10" pad="16"/>
+        <connect gate="G$1" pin="GPIO11" pad="17"/>
+        <connect gate="G$1" pin="GPIO12" pad="18"/>
+        <connect gate="G$1" pin="GPIO13" pad="19"/>
+        <connect gate="G$1" pin="GPIO14" pad="20"/>
+        <connect gate="G$1" pin="5V" pad="21"/>
+        <connect gate="G$1" pin="GND@1" pad="22"/>
+        <connect gate="G$1" pin="GND@2" pad="23"/>
+        <connect gate="G$1" pin="U0TXD" pad="24"/>
+        <connect gate="G$1" pin="U0RXD" pad="25"/>
+        <connect gate="G$1" pin="GPIO1" pad="26"/>
+        <connect gate="G$1" pin="GPIO2" pad="27"/>
+        <connect gate="G$1" pin="GPIO42" pad="28"/>
+        <connect gate="G$1" pin="GPIO41" pad="29"/>
+        <connect gate="G$1" pin="GPIO40" pad="30"/>
+        <connect gate="G$1" pin="GPIO39" pad="31"/>
+        <connect gate="G$1" pin="GPIO38" pad="32"/>
+        <connect gate="G$1" pin="GPIO37" pad="33"/>
+        <connect gate="G$1" pin="GPIO36" pad="34"/>
+        <connect gate="G$1" pin="GPIO35" pad="35"/>
+        <connect gate="G$1" pin="GPIO0" pad="36"/>
+        <connect gate="G$1" pin="GPIO45" pad="37"/>
+        <connect gate="G$1" pin="GPIO48" pad="38"/>
+        <connect gate="G$1" pin="GPIO47" pad="39"/>
+        <connect gate="G$1" pin="GPIO21" pad="40"/>
+        <connect gate="G$1" pin="GPIO20" pad="41"/>
+        <connect gate="G$1" pin="GPIO19" pad="42"/>
+        <connect gate="G$1" pin="GND@3" pad="43"/>
+        <connect gate="G$1" pin="GND@4" pad="44"/>
+       </connects>
+       <technologies>
+        <technology name=""/>
+       </technologies>
+      </device>
+     </devices>
+    </deviceset>
+   </devicesets>
+  </library>
+ </drawing>
+</eagle>
