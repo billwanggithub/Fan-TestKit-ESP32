@@ -46,9 +46,9 @@ enum {
 #define EPNUM_CDC_OUT   0x03
 #define EPNUM_CDC_IN    0x83
 
-#define HID_REPORT_DESC_SIZE 93  // usb_descriptors.c:usb_hid_report_descriptor 實際大小。
-                                 // 若 report descriptor 修改必須同步 (usb_descriptors.c 的
-                                 // _Static_assert 會把兩者綁住，漂移會 compile-fail)。
+#define HID_REPORT_DESC_SIZE 103  // usb_descriptors.c:usb_hid_report_descriptor 實際大小。
+                                  // 若 report descriptor 修改必須同步 (usb_descriptors.c 的
+                                  // _Static_assert 會把兩者綁住，漂移會 compile-fail)。
 
 #define CONFIG_TOTAL_LEN  (TUD_CONFIG_DESC_LEN + TUD_HID_DESC_LEN + TUD_CDC_DESC_LEN)
 

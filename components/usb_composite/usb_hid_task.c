@@ -14,6 +14,7 @@
 #include "pwm_gen.h"
 #include "rpm_cap.h"
 #include "net_dashboard.h"
+#include "ip_announcer.h"
 
 static const char *TAG = "usb_hid";
 
@@ -173,6 +174,22 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id,
         default:
             ESP_LOGW(TAG, "unknown settings_save op 0x%02x", op);
             break;
+        }
+    } break;
+    case USB_HID_REPORT_ANNOUNCER: {
+        if (bufsize < sizeof(usb_hid_announcer_t)) break;
+        const usb_hid_announcer_t *p = (const usb_hid_announcer_t *)buffer;
+        if (p->op == USB_HID_ANN_OP_ENABLE_TOGGLE) {
+            ctrl_cmd_t c = {
+                .kind = CTRL_CMD_ANNOUNCER_ENABLE,
+                .announcer_enable = { .enable = (p->enable != 0) ? 1 : 0 },
+            };
+            control_task_post(&c, 0);
+        } else if (p->op == USB_HID_ANN_OP_TEST_PUSH) {
+            ctrl_cmd_t c = { .kind = CTRL_CMD_ANNOUNCER_TEST };
+            control_task_post(&c, 0);
+        } else {
+            ESP_LOGW(TAG, "unknown announcer op 0x%02x", p->op);
         }
     } break;
     default:

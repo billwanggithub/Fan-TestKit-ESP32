@@ -19,6 +19,7 @@ idf_component_register(
                 net_dashboard
                 gpio_io
                 psu_driver
+                ip_announcer
                 # v6.0: freertos/ringbuf.h moved out of freertos transitive
                 # closure; usb_cdc_task.c uses RingbufHandle_t for SLIP frame
                 # buffering, so explicit dep is now required.
