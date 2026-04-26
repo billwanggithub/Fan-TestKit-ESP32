@@ -18,6 +18,7 @@
 #include "psu_driver.h"
 #include "ota_core.h"
 #include "net_dashboard.h"
+#include "ip_announcer.h"
 
 static const char *TAG = "usb_cdc";
 
@@ -231,6 +232,33 @@ static void handle_frame(const uint8_t *data, size_t len)
         };
         control_task_post(&c, 0);
     } break;
+    case USB_CDC_OP_ANNOUNCER_SET: {
+        // payload: u8 enable, u8 priority, str topic\0 str server\0
+        if (plen < 4) break;
+        const uint8_t *p = payload;
+        uint8_t en  = p[0];
+        uint8_t pri = p[1];
+        const char *topic  = (const char *)(p + 2);
+        size_t topic_n = strnlen(topic, plen - 2);
+        if (topic_n + 2 + 1 >= plen) break;
+        const char *server = topic + topic_n + 1;
+
+        ctrl_cmd_t c = {
+            .kind = CTRL_CMD_ANNOUNCER_SET,
+            .announcer_set = { .enable = en, .priority = pri },
+        };
+        strncpy(c.announcer_set.topic, topic,
+                sizeof(c.announcer_set.topic) - 1);
+        c.announcer_set.topic[sizeof(c.announcer_set.topic) - 1] = '\0';
+        strncpy(c.announcer_set.server, server,
+                sizeof(c.announcer_set.server) - 1);
+        c.announcer_set.server[sizeof(c.announcer_set.server) - 1] = '\0';
+        control_task_post(&c, 0);
+    } break;
+    case USB_CDC_OP_ANNOUNCER_TEST: {
+        ctrl_cmd_t c = { .kind = CTRL_CMD_ANNOUNCER_TEST };
+        control_task_post(&c, 0);
+    } break;
     default:
         ESP_LOGW(TAG, "unknown CDC op 0x%02x", op);
         break;
@@ -349,6 +377,48 @@ static void cdc_psu_telemetry_task(void *arg)
         }
         tud_cdc_write(&end, 1);
         tud_cdc_write_flush();
+
+        // ---- Announcer telemetry mirror (op 0x62, 5 Hz) ---------------------
+        // Build NUL-delimited variable-length frame:
+        //   [op][enable][priority][status][http_lo][http_hi]
+        //   [last_pushed_ip\0][topic\0][server\0][last_err\0]
+        ip_announcer_settings_t  ann_s;
+        ip_announcer_telemetry_t ann_t;
+        ip_announcer_get_settings(&ann_s);
+        ip_announcer_get_telemetry(&ann_t);
+
+        uint8_t abuf[256];
+        size_t  an = 0;
+        bool    ann_ok = true;
+        abuf[an++] = USB_CDC_OP_ANNOUNCER_TELEMETRY;
+        abuf[an++] = ann_s.enable ? 1 : 0;
+        abuf[an++] = ann_s.priority;
+        abuf[an++] = (uint8_t)ann_t.status;
+        abuf[an++] = (uint8_t)(ann_t.last_http_code & 0xff);
+        abuf[an++] = (uint8_t)((ann_t.last_http_code >> 8) & 0xff);
+
+        // C-strings: last_pushed_ip, topic, server, last_err
+        const char *ann_strs[4] = {
+            ann_t.last_pushed_ip,
+            ann_s.topic,
+            ann_s.server,
+            ann_t.last_err,
+        };
+        for (int si = 0; si < 4 && ann_ok; si++) {
+            size_t l = strlen(ann_strs[si]) + 1;
+            if (an + l > sizeof(abuf)) { ann_ok = false; break; }
+            memcpy(abuf + an, ann_strs[si], l);
+            an += l;
+        }
+
+        if (ann_ok) {
+            tud_cdc_write(&end, 1);
+            for (size_t i = 0; i < an; i++) {
+                cdc_write_byte_escaped(abuf[i]);
+            }
+            tud_cdc_write(&end, 1);
+            tud_cdc_write_flush();
+        }
 
         xSemaphoreGive(s_cdc_tx_mutex);
     }
