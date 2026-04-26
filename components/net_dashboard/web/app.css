@@ -812,7 +812,7 @@ button.danger[disabled] {
   padding: 0.3em 0.8em;
   cursor: pointer;
 }
-#psu-panel.psu-offline .psu-body {
+#psu-panel.psu-offline .psu-body > .psu-row:not(.psu-settings) {
   opacity: 0.4;
   pointer-events: none;
 }
