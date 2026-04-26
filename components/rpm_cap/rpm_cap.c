@@ -12,7 +12,6 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "nvs.h"
-#include "nvs_flash.h"
 
 #define NVS_NAMESPACE      "rpm_cap"
 #define NVS_KEY_POLE       "pole"
@@ -389,10 +388,11 @@ esp_err_t rpm_cap_save_params_to_nvs(void)
     uint16_t m = atomic_load_explicit(&s_cap.moving_avg_count, memory_order_relaxed);
     esp_err_t e1 = nvs_set_u8 (h, NVS_KEY_POLE, p);
     esp_err_t e2 = nvs_set_u16(h, NVS_KEY_MAVG, m);
-    if (e1 == ESP_OK && e2 == ESP_OK) nvs_commit(h);
+    esp_err_t ec = (e1 == ESP_OK && e2 == ESP_OK) ? nvs_commit(h) : ESP_OK;
     nvs_close(h);
     if (e1 != ESP_OK) return e1;
     if (e2 != ESP_OK) return e2;
+    if (ec != ESP_OK) return ec;
     ESP_LOGI(TAG, "saved to NVS: pole=%u mavg=%u", p, m);
     return ESP_OK;
 }
@@ -403,9 +403,11 @@ esp_err_t rpm_cap_save_timeout_to_nvs(void)
     esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
     if (e != ESP_OK) return e;
     uint32_t t = atomic_load_explicit(&s_cap.rpm_timeout_us, memory_order_relaxed);
-    e = nvs_set_u32(h, NVS_KEY_TIMEOUT, t);
-    if (e == ESP_OK) nvs_commit(h);
+    esp_err_t es = nvs_set_u32(h, NVS_KEY_TIMEOUT, t);
+    esp_err_t ec = (es == ESP_OK) ? nvs_commit(h) : ESP_OK;
     nvs_close(h);
-    if (e == ESP_OK) ESP_LOGI(TAG, "saved to NVS: timeout_us=%" PRIu32, t);
-    return e;
+    if (es != ESP_OK) return es;
+    if (ec != ESP_OK) return ec;
+    ESP_LOGI(TAG, "saved to NVS: timeout_us=%" PRIu32, t);
+    return ESP_OK;
 }
