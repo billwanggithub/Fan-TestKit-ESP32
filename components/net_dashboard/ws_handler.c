@@ -92,6 +92,14 @@ static void handle_json(cJSON *root, int fd)
             };
             control_task_post(&c2, 0);
         }
+    } else if (strcmp(type_j->valuestring, "save_rpm_params") == 0) {
+        ctrl_cmd_t c = { .kind = CTRL_CMD_SAVE_RPM_PARAMS };
+        control_task_post(&c, 0);
+        ws_send_json_to(fd, "{\"type\":\"ack\",\"op\":\"save_rpm_params\",\"ok\":true}");
+    } else if (strcmp(type_j->valuestring, "save_rpm_timeout") == 0) {
+        ctrl_cmd_t c = { .kind = CTRL_CMD_SAVE_RPM_TIMEOUT };
+        control_task_post(&c, 0);
+        ws_send_json_to(fd, "{\"type\":\"ack\",\"op\":\"save_rpm_timeout\",\"ok\":true}");
     } else if (strcmp(type_j->valuestring, "set_gpio_mode") == 0) {
         const cJSON *idx  = cJSON_GetObjectItem(root, "idx");
         const cJSON *mode = cJSON_GetObjectItem(root, "mode");
