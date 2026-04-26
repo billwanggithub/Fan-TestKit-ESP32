@@ -325,6 +325,79 @@ static int cmd_psu_family(int argc, char **argv)
     return 0;
 }
 
+// ---- CLI: announcer_set <topic> [server] [priority] ------------------------
+static struct {
+    struct arg_str *topic;
+    struct arg_str *server;
+    struct arg_int *priority;
+    struct arg_end *end;
+} s_ann_set_args;
+
+static int cmd_announcer_set(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_ann_set_args);
+    if (n != 0) { arg_print_errors(stderr, s_ann_set_args.end, argv[0]); return 1; }
+    ip_announcer_settings_t cur;
+    ip_announcer_get_settings(&cur);
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_ANNOUNCER_SET,
+        .announcer_set = {
+            .enable   = cur.enable ? 1 : 0,
+            .priority = (s_ann_set_args.priority->count > 0)
+                        ? (uint8_t)s_ann_set_args.priority->ival[0]
+                        : cur.priority,
+        },
+    };
+    snprintf(c.announcer_set.topic, sizeof(c.announcer_set.topic), "%s",
+             s_ann_set_args.topic->sval[0]);
+    const char *srv = (s_ann_set_args.server->count > 0)
+                      ? s_ann_set_args.server->sval[0]
+                      : cur.server;
+    snprintf(c.announcer_set.server, sizeof(c.announcer_set.server), "%s", srv);
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: announcer_enable <0|1> -------------------------------------------
+static struct {
+    struct arg_int *en;
+    struct arg_end *end;
+} s_ann_enable_args;
+
+static int cmd_announcer_enable(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_ann_enable_args);
+    if (n != 0) { arg_print_errors(stderr, s_ann_enable_args.end, argv[0]); return 1; }
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_ANNOUNCER_ENABLE,
+        .announcer_enable = { .enable = (s_ann_enable_args.en->ival[0] ? 1 : 0) },
+    };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: announcer_test ---------------------------------------------------
+static int cmd_announcer_test(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    ctrl_cmd_t c = { .kind = CTRL_CMD_ANNOUNCER_TEST };
+    return control_task_post(&c, pdMS_TO_TICKS(100)) == ESP_OK ? 0 : 1;
+}
+
+// ---- CLI: announcer_status -------------------------------------------------
+static int cmd_announcer_status(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    ip_announcer_settings_t  s;
+    ip_announcer_telemetry_t t;
+    ip_announcer_get_settings(&s);
+    ip_announcer_get_telemetry(&t);
+    static const char *status_str[] = { "never", "ok", "failed", "disabled" };
+    printf("announcer  enable=%d  topic=%s  server=%s  priority=%u\n",
+           s.enable, s.topic, s.server, (unsigned)s.priority);
+    printf("           last_status=%s  last_ip=%s  http=%d  err=\"%s\"\n",
+           status_str[t.status], t.last_pushed_ip, t.last_http_code, t.last_err);
+    return 0;
+}
+
 // ---- CLI: status -----------------------------------------------------------
 
 static int cmd_status(int argc, char **argv)
@@ -484,6 +557,46 @@ static void register_commands(void)
         .argtable = &s_psu_family_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&psu_family_cmd));
+
+    s_ann_set_args.topic    = arg_str1(NULL, NULL, "<topic>",     "ntfy topic name (8..64 chars)");
+    s_ann_set_args.server   = arg_str0(NULL, NULL, "[server]",    "hostname only, default ntfy.sh");
+    s_ann_set_args.priority = arg_int0(NULL, NULL, "[priority]",  "1..5, default 3");
+    s_ann_set_args.end      = arg_end(3);
+    const esp_console_cmd_t ann_set_cmd = {
+        .command = "announcer_set",
+        .help    = "set ntfy topic / server / priority",
+        .hint    = NULL,
+        .func    = cmd_announcer_set,
+        .argtable = &s_ann_set_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ann_set_cmd));
+
+    s_ann_enable_args.en  = arg_int1(NULL, NULL, "<en>", "1 = enabled, 0 = disabled");
+    s_ann_enable_args.end = arg_end(1);
+    const esp_console_cmd_t ann_en_cmd = {
+        .command = "announcer_enable",
+        .help    = "enable / disable IP push notifications",
+        .hint    = NULL,
+        .func    = cmd_announcer_enable,
+        .argtable = &s_ann_enable_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ann_en_cmd));
+
+    const esp_console_cmd_t ann_test_cmd = {
+        .command = "announcer_test",
+        .help    = "trigger an immediate test push",
+        .hint    = NULL,
+        .func    = cmd_announcer_test,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ann_test_cmd));
+
+    const esp_console_cmd_t ann_status_cmd = {
+        .command = "announcer_status",
+        .help    = "print announcer state + last push result",
+        .hint    = NULL,
+        .func    = cmd_announcer_status,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&ann_status_cmd));
 
     const esp_console_cmd_t st_cmd = {
         .command = "status", .help = "print PWM + RPM snapshot",
