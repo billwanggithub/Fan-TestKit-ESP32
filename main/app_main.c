@@ -243,6 +243,27 @@ static int cmd_psu_status(int argc, char **argv)
     return 0;
 }
 
+// ---- CLI: psu_family [<name>] -----------------------------------------------
+static struct { struct arg_str *name; struct arg_end *end; } s_psu_family_args;
+static int cmd_psu_family(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_psu_family_args);
+    if (n != 0) {
+        // No arg → print current.
+        printf("psu_family: %s\n", psu_driver_get_family());
+        return 0;
+    }
+    const char *want = s_psu_family_args.name->sval[0];
+    esp_err_t e = psu_driver_set_family(want);
+    if (e == ESP_ERR_INVALID_ARG) {
+        printf("invalid family '%s' (use riden|xy_sk120|wz5005)\n", want);
+        return 1;
+    }
+    if (e != ESP_OK) { printf("set failed: %s\n", esp_err_to_name(e)); return 1; }
+    printf("psu_family set to '%s' — reboot to apply\n", want);
+    return 0;
+}
+
 // ---- CLI: status -----------------------------------------------------------
 
 static int cmd_status(int argc, char **argv)
@@ -360,6 +381,18 @@ static void register_commands(void)
         .help = "print PSU snapshot (v_set/i_set/v_out/i_out/link/model)",
         .hint = NULL, .func = cmd_psu_status };
     ESP_ERROR_CHECK(esp_console_cmd_register(&psu_status_cmd));
+
+    s_psu_family_args.name = arg_str0(NULL, NULL, "<name>",
+                                      "riden | xy_sk120 | wz5005 (omit to print current)");
+    s_psu_family_args.end  = arg_end(1);
+    const esp_console_cmd_t psu_family_cmd = {
+        .command = "psu_family",
+        .help    = "get/set PSU family in NVS (reboot to apply)",
+        .hint    = NULL,
+        .func    = cmd_psu_family,
+        .argtable = &s_psu_family_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&psu_family_cmd));
 
     const esp_console_cmd_t st_cmd = {
         .command = "status", .help = "print PWM + RPM snapshot",
