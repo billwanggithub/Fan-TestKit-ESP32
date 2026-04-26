@@ -122,6 +122,29 @@ static int cmd_save_pwm_freq(int argc, char **argv)
     return 0;
 }
 
+// ---- CLI: save_ui_steps <duty_step> <freq_step> ----------------------------
+static struct {
+    struct arg_dbl *duty;
+    struct arg_int *freq;
+    struct arg_end *end;
+} s_save_ui_steps_args;
+
+static int cmd_save_ui_steps(int argc, char **argv)
+{
+    int n = arg_parse(argc, argv, (void **)&s_save_ui_steps_args);
+    if (n != 0) { arg_print_errors(stderr, s_save_ui_steps_args.end, argv[0]); return 1; }
+    float    d = (float)s_save_ui_steps_args.duty->dval[0];
+    uint16_t f = (uint16_t)s_save_ui_steps_args.freq->ival[0];
+    ctrl_cmd_t c = {
+        .kind = CTRL_CMD_SAVE_UI_STEPS,
+        .save_ui_steps = { .duty_step = d, .freq_step = f },
+    };
+    esp_err_t e = control_task_post(&c, pdMS_TO_TICKS(50));
+    if (e != ESP_OK) { printf("post failed: %s\n", esp_err_to_name(e)); return 1; }
+    printf("save_ui_steps queued\n");
+    return 0;
+}
+
 // ---- CLI: gpio_mode <idx> <mode> -------------------------------------------
 
 static struct {
@@ -383,6 +406,15 @@ static void register_commands(void)
         .hint = NULL, .func = cmd_save_pwm_freq, .argtable = &s_save_pwm_freq_args,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&spf_cmd));
+
+    s_save_ui_steps_args.duty = arg_dbl1(NULL, NULL, "<duty_step>", "duty step in percent (e.g. 0.5)");
+    s_save_ui_steps_args.freq = arg_int1(NULL, NULL, "<freq_step>", "freq step in Hz");
+    s_save_ui_steps_args.end  = arg_end(2);
+    const esp_console_cmd_t sus_cmd = {
+        .command = "save_ui_steps", .help = "persist slider step sizes to NVS",
+        .hint = NULL, .func = cmd_save_ui_steps, .argtable = &s_save_ui_steps_args,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&sus_cmd));
 
     s_gpio_mode_args.idx  = arg_int1(NULL, NULL, "<idx>",  "GPIO index 0..15");
     s_gpio_mode_args.mode = arg_str1(NULL, NULL, "<mode>", "i_pd|i_pu|i_fl|o");
