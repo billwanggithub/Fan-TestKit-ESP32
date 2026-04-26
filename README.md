@@ -13,11 +13,23 @@ The release-hardening checklist is in `docs/release-hardening.md`.
 
 ## Status (2026-04-26)
 
-Multi-family PSU support landed: `psu_driver/` dispatches to one of
-three backends (`riden` / `xy_sk120` / `wz5005`) at boot, picked from
-NVS via the dashboard PSU panel's Family dropdown or the CLI
-`psu_family <name>`. Hardware verification still pending — see
-`HANDOFF.md` for the open D-series tasks.
+NVS-persisted runtime tunables landed: RPM pole/mavg/timeout, PWM
+freq, and dashboard slider step sizes (duty/freq) all survive
+reboot via explicit Save commands reachable from all four
+transports (WS / HID / CDC / CLI). PWM duty deliberately resets to
+0 on boot regardless of saved state — safety invariant for
+unsupervised restart. New `components/ui_settings/` component owns
+step sizes; dashboard now reads them from the WS status frame so
+all browser clients stay in sync. Full design + per-task wiring in
+`docs/superpowers/plans/2026-04-26-nvs-persisted-settings.md`; NVS
+contract summary in `CLAUDE.md`.
+
+Earlier (2026-04-26): multi-family PSU support landed. `psu_driver/`
+dispatches to one of three backends (`riden` / `xy_sk120` /
+`wz5005`) at boot, picked from NVS via the dashboard PSU panel's
+Family dropdown or the CLI `psu_family <name>`. Hardware
+verification still pending — see `HANDOFF.md` for the open D-series
+tasks.
 
 Earlier (2026-04-22): migrated to **ESP-IDF v6.0** (was v5.5.1). PWM
 band-cross verified on scope; Wi-Fi provisioning, HTTP dashboard,
@@ -115,6 +127,11 @@ under *PSU driver* (separate menu).
   `rpm_params <pole> <mavg>`, `rpm_timeout <us>`, `psu_v <volts>`,
   `psu_i <amps>`, `psu_out <0|1>`, `psu_slave <addr>`,
   `psu_family <name>`, `psu_status`, `status`, `help`. Baud is 115200.
+  Save-to-NVS commands: `save_rpm_params`, `save_rpm_timeout`,
+  `save_pwm_freq`, `save_ui_steps <duty> <freq>` — each persists the
+  current live value(s) so they survive reboot. Saved PWM freq is
+  reapplied at boot; saved duty is **not** a concept (boot duty is
+  always 0).
 - **SoftAP captive portal** (first-time setup): on a board without
   stored Wi-Fi credentials, the device brings up an open AP named
   `Fan-TestKit-setup`. Join it from your phone and open **any** URL in
@@ -205,11 +222,12 @@ a re-flash clears all NVS.
 main/                      app_main, control_task, UART CLI, Kconfig
 components/
   app_api/                 cross-component ctrl_cmd_t header
-  pwm_gen/                 MCPWM generator
-  rpm_cap/                 MCPWM capture + converter + averager
+  pwm_gen/                 MCPWM generator + NVS save_freq
+  rpm_cap/                 MCPWM capture + converter + averager + NVS save
   gpio_io/                 GPIO IO + relay power switch
   psu_driver/              UART1 PSU dispatcher + 3 backends (riden, xy_sk120, wz5005)
                            shared psu_modbus_rtu helpers (CRC-16 + FC 0x03/0x06)
+  ui_settings/             dashboard slider step sizes (NVS-backed; served via WS)
   usb_composite/           TinyUSB HID + CDC + log redirect
   net_dashboard/           SoftAP captive portal + HTTP + WebSocket + mDNS + web UI
   ota_core/                shared esp_ota_* writer (Wi-Fi + USB frontends)
