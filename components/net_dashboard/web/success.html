@@ -20,5 +20,18 @@ h1 { font-size: 1.3em; }
 
 <a class="link" href="http://{{IP}}/">http://{{IP}}/</a>
 <p class="hint">(fallback if .local names do not resolve on your phone)</p>
+
+<section class="ntfy">
+  <h3>📲 Get IP notifications on this phone</h3>
+  <p>Install the <strong>ntfy</strong> app
+     (<a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy">Play Store</a>
+      / <a href="https://apps.apple.com/app/ntfy/id1625396347">App Store</a>),
+     then tap below to subscribe to this device's topic:</p>
+  <p><a class="btn" href="{{NTFY_DEEPLINK}}">Open in ntfy app</a></p>
+  <p><small>Topic: <code>{{NTFY_TOPIC}}</code><br>
+     Web view: <a href="{{NTFY_WEBLINK}}">{{NTFY_WEBLINK}}</a><br>
+     (Subscribe in the app, then enable IP push from the dashboard
+      Settings &rarr; IP Announcer.)</small></p>
+</section>
 </body>
 </html>

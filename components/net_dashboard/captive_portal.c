@@ -8,6 +8,8 @@
 #include "esp_log.h"
 #include "cJSON.h"
 
+#include "ip_announcer.h"
+
 static const char *TAG = "captive";
 
 static httpd_handle_t               s_httpd;
@@ -138,7 +140,7 @@ static esp_err_t success_get(httpd_req_t *req)
     snprintf(ip_buf, sizeof(ip_buf), IPSTR, IP2STR(&info.ip));
 
     const size_t tpl_len = (size_t)(success_html_end - success_html_start - 1);
-    char rendered[2048];
+    char rendered[3072];
     if (tpl_len + 64 > sizeof(rendered)) {
         httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "template too large");
         return ESP_OK;
@@ -146,10 +148,23 @@ static esp_err_t success_get(httpd_req_t *req)
     memcpy(rendered, success_html_start, tpl_len);
     rendered[tpl_len] = '\0';
 
-    // Naive replace (each token appears twice in the template). Do them
-    // one at a time; capacity check above guarantees room.
-    const char *repl[][2] = { {"{{IP}}", ip_buf}, {"{{MDNS}}", "fan-testkit.local"} };
-    for (int r = 0; r < 2; r++) {
+    ip_announcer_settings_t ann_s;
+    ip_announcer_get_settings(&ann_s);
+    char deeplink[200];
+    char weblink[200];
+    snprintf(deeplink, sizeof(deeplink), "ntfy://%s/%s?subscribe=1",
+             ann_s.server, ann_s.topic);
+    snprintf(weblink,  sizeof(weblink),  "https://%s/%s",
+             ann_s.server, ann_s.topic);
+
+    const char *repl[][2] = {
+        { "{{IP}}",            ip_buf      },
+        { "{{MDNS}}",          "fan-testkit.local" },
+        { "{{NTFY_TOPIC}}",    ann_s.topic },
+        { "{{NTFY_DEEPLINK}}", deeplink    },
+        { "{{NTFY_WEBLINK}}",  weblink     },
+    };
+    for (size_t r = 0; r < sizeof(repl)/sizeof(repl[0]); r++) {
         const char *tok = repl[r][0];
         const char *val = repl[r][1];
         size_t tok_len = strlen(tok);
