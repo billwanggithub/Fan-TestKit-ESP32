@@ -278,6 +278,58 @@
     <span id="factory_reset_status" class="status"></span>
   </section>
 
+  <!-- ============== IP Announcer panel ============== -->
+  <section class="panel" id="announcer">
+    <h2 data-i18n="announcer_h">IP Announcer (ntfy.sh)</h2>
+
+    <div id="announcer-banner" class="banner banner-error" hidden>
+      <span data-i18n="announcer_banner_placeholder">
+        Topic looks like a placeholder — change it before enabling push.
+      </span>
+    </div>
+
+    <label>
+      <input type="checkbox" id="announcer-enable" />
+      <span data-i18n="announcer_enable">Enable IP push notifications</span>
+    </label>
+
+    <div class="row">
+      <label data-i18n="announcer_topic">Topic:</label>
+      <input type="text" id="announcer-topic" maxlength="64" />
+      <button type="button" id="announcer-randomize" data-i18n="announcer_random">🎲 Random</button>
+    </div>
+
+    <div class="row">
+      <label data-i18n="announcer_server">Server:</label>
+      <input type="text" id="announcer-server" maxlength="96" value="ntfy.sh" />
+    </div>
+
+    <div class="row">
+      <label data-i18n="announcer_priority">Priority:</label>
+      <select id="announcer-priority">
+        <option value="1">1 — Min</option>
+        <option value="2">2 — Low</option>
+        <option value="3" selected>3 — Default</option>
+        <option value="4">4 — High</option>
+        <option value="5">5 — Max</option>
+      </select>
+    </div>
+
+    <p class="status" id="announcer-status" data-i18n="announcer_status_never">
+      Never pushed.
+    </p>
+
+    <div class="row">
+      <button type="button" id="announcer-test" data-i18n="announcer_test">Send test now</button>
+      <button type="button" id="announcer-save" data-i18n="announcer_save">Save</button>
+    </div>
+
+    <p class="hint">
+      <span data-i18n="announcer_subscribe_h">📲 Subscribe on phone:</span>
+      <a id="announcer-deeplink" href="#" data-i18n="announcer_open_in_app">Open in ntfy app</a>
+    </p>
+  </section>
+
   <!-- ============== Help panel (bottom — reference material) ============== -->
   <details class="panel help-panel" id="help">
     <summary data-i18n="help">Help</summary>

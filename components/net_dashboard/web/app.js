@@ -90,6 +90,23 @@
       psu_reboot: 'Reboot',
       psu_family_pending: 'reboot to apply',
       save: 'Save',
+      announcer_h: 'IP Announcer (ntfy.sh)',
+      announcer_enable: 'Enable IP push notifications',
+      announcer_topic: 'Topic:',
+      announcer_server: 'Server:',
+      announcer_priority: 'Priority:',
+      announcer_test: 'Send test now',
+      announcer_save: 'Save',
+      announcer_random: '🎲 Random',
+      announcer_status_never: 'Never pushed.',
+      announcer_status_ok: 'Pushed {ip} ({age})',
+      announcer_status_failed: 'Failed: {err}',
+      announcer_status_disabled: 'Disabled.',
+      announcer_subscribe_h: '📲 Subscribe on phone:',
+      announcer_open_in_app: 'Open in ntfy app',
+      announcer_banner_placeholder: 'Topic looks like a placeholder — change it before enabling push.',
+      announcer_help_h: 'IP Announcer (ntfy.sh push notifications)',
+      announcer_help_p: 'When enabled, the device pushes its IP to ntfy.sh on every Wi-Fi connection. Install the ntfy app on your phone, subscribe to your topic, and tap the notification to open the dashboard. The topic name acts as a password — anyone with it can read your IP. Use a long, random topic.',
     },
     'zh-Hant': {
       app_title: 'Fan-TestKit 儀表板',
@@ -175,6 +192,23 @@
       psu_reboot: '重新開機',
       psu_family_pending: '重開後生效',
       save: '儲存',
+      announcer_h: 'IP 通知 (ntfy.sh)',
+      announcer_enable: '啟用 IP 推播',
+      announcer_topic: 'Topic:',
+      announcer_server: '伺服器:',
+      announcer_priority: '優先順序:',
+      announcer_test: '立即測試',
+      announcer_save: '儲存',
+      announcer_random: '🎲 隨機',
+      announcer_status_never: '尚未推送過。',
+      announcer_status_ok: '已推送 {ip} ({age})',
+      announcer_status_failed: '失敗：{err}',
+      announcer_status_disabled: '已停用。',
+      announcer_subscribe_h: '📲 在手機上訂閱：',
+      announcer_open_in_app: '在 ntfy app 開啟',
+      announcer_banner_placeholder: 'Topic 看起來像 placeholder — 啟用推播前請先修改。',
+      announcer_help_h: 'IP 通知 (ntfy.sh 推播)',
+      announcer_help_p: '啟用後，每次 Wi-Fi 連線會把 IP 推送到 ntfy.sh。手機裝 ntfy app、訂閱你的 topic、點通知就能直接開 dashboard。Topic 等同密碼 — 任何知道它的人都能看到你推送的 IP，請用夠長夠隨機的字串。',
     },
     'zh-Hans': {
       app_title: 'Fan-TestKit 仪表板',
@@ -260,6 +294,23 @@
       psu_reboot: '重新开机',
       psu_family_pending: '重启后生效',
       save: '保存',
+      announcer_h: 'IP 通知 (ntfy.sh)',
+      announcer_enable: '启用 IP 推送',
+      announcer_topic: 'Topic:',
+      announcer_server: '服务器:',
+      announcer_priority: '优先级:',
+      announcer_test: '立即测试',
+      announcer_save: '保存',
+      announcer_random: '🎲 随机',
+      announcer_status_never: '尚未推送过。',
+      announcer_status_ok: '已推送 {ip} ({age})',
+      announcer_status_failed: '失败：{err}',
+      announcer_status_disabled: '已停用。',
+      announcer_subscribe_h: '📲 在手机上订阅：',
+      announcer_open_in_app: '在 ntfy app 打开',
+      announcer_banner_placeholder: 'Topic 看起来像占位符 — 启用推送前请先修改。',
+      announcer_help_h: 'IP 通知 (ntfy.sh 推送)',
+      announcer_help_p: '启用后，每次 Wi-Fi 连接会把 IP 推送到 ntfy.sh。手机装 ntfy app、订阅你的 topic、点通知就能直接打开 dashboard。Topic 等同密码 — 任何知道它的人都能看到你推送的 IP，请用够长够随机的字符串。',
     },
   };
 
@@ -1076,6 +1127,10 @@
         if (typeof msg.pulse_width_ms === 'number') setPulseWidthFromDevice(msg.pulse_width_ms);
         if (msg.psu) psuPanel.setFromDevice(msg.psu);
         applyStepFromServer(msg.ui);
+        // announcer block from status frame
+        if (msg.announcer) {
+          applyAnnouncerStatus(msg.announcer);
+        }
       } else if (msg.type === 'ack') {
         if (msg.op === 'factory_reset') {
           const fs = document.getElementById('factory_reset_status');
@@ -1111,6 +1166,81 @@
     const r = await fetch('/ota', { method: 'POST', body: f });
     if (r.ok) { prog.value = 100; alert(t('ota_accepted')); }
     else     { alert(t('ota_failed') + r.status); }
+  });
+
+  // ---------- IP Announcer panel ----------
+  function announcerTopicLooksSafe(topic) {
+    if (!topic) return false;
+    if (topic.length < 16) return false;
+    const lower = topic.toLowerCase();
+    if (lower.startsWith('change-me-')) return false;
+    if (lower.startsWith('fan-testkit-change')) return false;
+    return true;
+  }
+
+  function applyAnnouncerStatus(a) {
+    // Only repopulate inputs when the user is NOT actively editing them.
+    const topicInput = document.getElementById('announcer-topic');
+    const serverInput = document.getElementById('announcer-server');
+    const priorityInput = document.getElementById('announcer-priority');
+    const enableInput = document.getElementById('announcer-enable');
+    if (document.activeElement !== topicInput) topicInput.value = a.topic || '';
+    if (document.activeElement !== serverInput) serverInput.value = a.server || 'ntfy.sh';
+    if (document.activeElement !== priorityInput) priorityInput.value = String(a.priority || 3);
+    enableInput.checked = !!a.enable;
+
+    const banner = document.getElementById('announcer-banner');
+    banner.hidden = announcerTopicLooksSafe(a.topic);
+
+    const statusEl = document.getElementById('announcer-status');
+    if (a.status === 'ok') {
+      statusEl.textContent = t('announcer_status_ok')
+        .replace('{ip}', a.last_pushed_ip || '?')
+        .replace('{age}', '');
+      statusEl.style.color = 'green';
+    } else if (a.status === 'failed') {
+      statusEl.textContent = t('announcer_status_failed')
+        .replace('{err}', a.last_err || '?');
+      statusEl.style.color = 'red';
+    } else if (a.status === 'disabled') {
+      statusEl.textContent = t('announcer_status_disabled');
+      statusEl.style.color = '';
+    } else {
+      statusEl.textContent = t('announcer_status_never');
+      statusEl.style.color = '';
+    }
+
+    const dl = document.getElementById('announcer-deeplink');
+    dl.href = `ntfy://${a.server || 'ntfy.sh'}/${a.topic || ''}?subscribe=1`;
+
+    // Disable Test button when topic is unsafe.
+    document.getElementById('announcer-test').disabled =
+      !announcerTopicLooksSafe(a.topic);
+  }
+
+  document.getElementById('announcer-randomize').addEventListener('click', () => {
+    const alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let tok = '';
+    const arr = new Uint32Array(32);
+    crypto.getRandomValues(arr);
+    for (let i = 0; i < 32; i++) tok += alphabet[arr[i] % alphabet.length];
+    document.getElementById('announcer-topic').value = `fan-testkit-${tok}`;
+  });
+
+  document.getElementById('announcer-save').addEventListener('click', () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      type: 'set_announcer',
+      enable: document.getElementById('announcer-enable').checked,
+      topic: document.getElementById('announcer-topic').value.trim(),
+      server: document.getElementById('announcer-server').value.trim() || 'ntfy.sh',
+      priority: parseInt(document.getElementById('announcer-priority').value, 10) || 3,
+    }));
+  });
+
+  document.getElementById('announcer-test').addEventListener('click', () => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'test_announcer' }));
   });
 
   // ---------- Factory reset ----------

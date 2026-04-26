@@ -775,6 +775,18 @@ button.danger[disabled] {
   .gpio-row .gpio-pinnum { grid-column: 2; }
 }
 
+/* ---- Announcer banner ---------------------------------------------------- */
+.banner {
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  margin-bottom: 0.75rem;
+}
+.banner-error {
+  background: #fde7e7;
+  color: #a02020;
+  border: 1px solid #f3b2b2;
+}
+
 /* ---- Power Supply panel ------------------------------------------------- */
 #psu-panel .psu-meta {
   font-size: 0.85em;
