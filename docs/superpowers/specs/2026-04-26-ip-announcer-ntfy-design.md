@@ -225,18 +225,126 @@ ignore. (b) is simpler and matches existing patterns elsewhere
 
 Namespace: `ip_announcer`
 
-| Key        | Type | Default                  | Notes                              |
-|------------|------|--------------------------|------------------------------------|
-| `enable`   | u8   | 0                        | 0 = disabled, 1 = enabled          |
-| `topic`    | str  | (auto-gen on first boot) | 8..64 chars, `[a-zA-Z0-9_-]+`      |
-| `server`   | str  | `"ntfy.sh"`              | hostname only; no scheme, no path  |
-| `priority` | u8   | 3                        | clamp to 1..5 on read              |
-| `last_ip`  | str  | `""`                     | last successfully-pushed IP        |
+| Key        | Type | Default                            | Notes                              |
+|------------|------|------------------------------------|------------------------------------|
+| `enable`   | u8   | 0                                  | 0 = disabled, 1 = enabled          |
+| `topic`    | str  | (resolved on first boot, see below)| 8..64 chars, `[a-zA-Z0-9_-]+`      |
+| `server`   | str  | `"ntfy.sh"`                        | hostname only; no scheme, no path  |
+| `priority` | u8   | 3                                  | clamp to 1..5 on read              |
+| `last_ip`  | str  | `""`                               | last successfully-pushed IP        |
 
-### Auto-generated topic on first boot (the "(c)" decision)
+### First-boot topic resolution
 
-If `topic` is missing in NVS at `ip_announcer_init` time, generate one
-locally using `esp_random()` and persist immediately:
+A 3-tier fallback chain runs once during `ip_announcer_init`. The
+result is persisted immediately to NVS so subsequent boots take the
+fast path (NVS lookup, no resolution).
+
+```text
+NVS has topic? ──yes──► use NVS topic (user already customised)
+       │
+       no
+       │
+       ▼
+Kconfig APP_IP_ANNOUNCER_TOPIC_DEFAULT non-empty? ──yes──► use Kconfig value
+       │                                                       (write to NVS)
+       no
+       │
+       ▼
+Generate random `fan-testkit-<32 chars>` via esp_random() (write to NVS)
+```
+
+This gives three distinct deployment patterns:
+
+1. **Personal multi-board build** (developer's own bench): set
+   `APP_IP_ANNOUNCER_TOPIC_DEFAULT` in a gitignored
+   `sdkconfig.defaults.local` to a private string like
+   `fan-testkit-billwang-bench-9c2f3a`. Every board you flash from
+   that build subscribes to the same topic — one ntfy subscription
+   covers the whole bench.
+
+2. **Public / shared firmware build** (repo head, no overrides):
+   Kconfig stays empty → random per-board topic → safe by default,
+   no accidental privacy leak when the binary is shared.
+
+3. **One-off override** (per-board customisation post-flash): set
+   topic from the dashboard → NVS overrides the Kconfig default for
+   that board only. Re-flashing keeps the NVS topic unless `del
+   sdkconfig` + nvs erase is done.
+
+### Kconfig
+
+`components/ip_announcer/Kconfig` adds:
+
+```kconfig
+menu "IP Announcer (ntfy)"
+
+config APP_IP_ANNOUNCER_TOPIC_DEFAULT
+    string "Default ntfy topic (empty = auto-generate random)"
+    default ""
+    help
+        Topic name pushed to ntfy.sh on every IP_EVENT_STA_GOT_IP.
+        WARNING: this is your channel's de-facto password — anyone
+        who reads this string from your repo can subscribe and see
+        every IP this device pushes. Either:
+          - Leave empty: each board generates a private random topic
+            on first boot. Recommended for shared / public builds.
+          - Set in sdkconfig.defaults.local (gitignored): all boards
+            from your private build share one topic. Convenient for
+            multi-board ownership; do NOT commit this file.
+        Topics that look like a placeholder ("CHANGE-ME-*", or fewer
+        than 16 chars after trimming) refuse to push at runtime and
+        the dashboard surfaces a red warning.
+
+config APP_IP_ANNOUNCER_SERVER_DEFAULT
+    string "Default ntfy server hostname"
+    default "ntfy.sh"
+    help
+        Hostname only, no scheme, no path. Override at runtime via
+        the dashboard / CLI for self-hosted ntfy instances.
+
+endmenu
+```
+
+`sdkconfig.defaults` (committed) keeps both values empty/default.
+`sdkconfig.defaults.local` (gitignored, see §"Git hygiene" below) is
+where the user puts their private topic.
+
+### Topic safety guard (refuse-to-push)
+
+The placeholder / too-short check runs every time a push is enqueued,
+not just at init, so a user who later sets `enable=1` while topic is
+still a placeholder gets the same protection.
+
+```c
+static bool topic_is_safe(const char *topic)
+{
+    if (!topic) return false;
+    size_t n = strlen(topic);
+    if (n < 16) return false;
+    if (strncasecmp(topic, "CHANGE-ME-", 10) == 0) return false;
+    if (strncasecmp(topic, "fan-testkit-CHANGE", 18) == 0) return false;
+    return true;
+}
+```
+
+Behaviour when `topic_is_safe(s.topic) == false`:
+
+- Push request: silently dropped, telemetry status set to
+  `IP_ANN_STATUS_FAILED`, `last_err` = `"topic looks like a placeholder; change it before enabling push"`.
+- Dashboard: red banner across the IP Announcer panel with the same
+  message; Save button still works (so user can fix it), Test button
+  is disabled.
+- CLI: `announcer_test` prints the same error and exits non-zero.
+
+This guard is what makes pattern (1) safe — even if a developer
+accidentally commits a real personal topic to the public Kconfig
+default and someone forks the repo and `git push`-es a build with
+`enable=1` enabled in NVS, the placeholder shape catches the
+"didn't customise" mistake. It does NOT catch "your real topic
+leaked because you committed the personal one" — that's a Git
+hygiene issue the user has to handle.
+
+### Random fallback (when both NVS and Kconfig are empty)
 
 ```c
 char tok[33];                                  // 32 chars + NUL
@@ -253,13 +361,19 @@ ip_announcer_save(&s);
 ```
 
 Result example: `fan-testkit-A7kQp9zT2wXv4LnB6mFhCdUgPyEsNrMo`.
+The `fan-testkit-` prefix makes it human-recognisable in the ntfy
+app's topic list; the 32-char random suffix puts the search space at
+62^32 ≈ 2^190, past brute-forceable.
 
-`enable` stays 0 — the user must opt in. This matches the existing
-"new feature is off by default" pattern.
+`enable` stays 0 in all three paths — the user must opt in. This
+matches the existing "new feature is off by default" pattern.
 
-The `fan-testkit-` prefix makes it human-recognisable in the ntfy app's
-topic list; the 32-char random suffix puts the search space at 62^32 ≈
-2^190, well past brute-forceable.
+### Git hygiene
+
+`.gitignore` gains `sdkconfig.defaults.local`. README + CLAUDE.md
+add a short note: "If you set `APP_IP_ANNOUNCER_TOPIC_DEFAULT` to a
+real topic, put it in `sdkconfig.defaults.local`, never in the
+committed `sdkconfig.defaults`."
 
 ### Captive-portal `/success` integration
 
@@ -428,7 +542,8 @@ A new `<details>` block in the Help footer documenting:
 | Failure                                        | Behaviour                                               |
 |------------------------------------------------|---------------------------------------------------------|
 | `enable=0`                                     | Skip, status = `disabled`                               |
-| Topic empty / too short                        | Save rejects with `ESP_ERR_INVALID_ARG`; UI shows error |
+| Topic empty / shorter than 16 chars            | Save rejects with `ESP_ERR_INVALID_ARG`; UI shows error |
+| Topic looks like placeholder (`CHANGE-ME-*`)   | See "Placeholder topic" note below                      |
 | DNS resolution fails                           | Retry 3× with 5 s gap; final = `failed`, log warn       |
 | TCP / TLS handshake fails                      | Same as above                                           |
 | HTTP 2xx                                       | Status `ok`, persist `last_pushed_ip`                   |
@@ -436,6 +551,14 @@ A new `<details>` block in the Help footer documenting:
 | HTTP 5xx                                       | Retry 3× with 5 s gap                                   |
 | Same IP as last successful push                | Skip, no push; status remains `ok` with previous IP     |
 | `last_ip` matches but last status was `failed` | Push (we treat the previous failure as still pending)   |
+
+**Placeholder topic:** Push is refused at enqueue. `status` flips to
+`failed` and `last_err` is set to `"topic looks like a placeholder;
+change it before enabling push"`. The dashboard shows a red banner
+across the IP Announcer panel and the Test button is disabled until
+the user saves a non-placeholder topic. CLI `announcer_test` exits
+non-zero with the same message. Save still works so the user can
+fix it.
 
 Push failures NEVER block boot, NEVER block other tasks. The push task
 is fire-and-forget after enqueue.
@@ -505,8 +628,9 @@ is fire-and-forget after enqueue.
 None. All decisions resolved in brainstorm:
 
 - Channel: ntfy.sh (vs Telegram, BLE) — chosen.
-- Topic strategy: auto-gen on first boot + captive-portal display +
-  enable-stays-off — chosen ("c" option).
+- Topic strategy: 3-tier resolution (NVS → Kconfig default →
+  random fallback) + placeholder safety guard + captive-portal
+  display + enable-stays-off.
 - Encryption: no.
 - HID surface: enable + test only, no string fields.
 - Boot order: register IP_EVENT handler before `net_dashboard_start`.
@@ -516,13 +640,16 @@ None. All decisions resolved in brainstorm:
 New:
 
 - `components/ip_announcer/CMakeLists.txt`
-- `components/ip_announcer/Kconfig`
+- `components/ip_announcer/Kconfig` — `APP_IP_ANNOUNCER_TOPIC_DEFAULT`
+  (empty default → random fallback), `APP_IP_ANNOUNCER_SERVER_DEFAULT`
 - `components/ip_announcer/include/ip_announcer.h`
 - `components/ip_announcer/ip_announcer.c`
 - `components/ip_announcer/ip_announcer_push.c`
 
 Modified:
 
+- `.gitignore` — add `sdkconfig.defaults.local` so private topic
+  overrides don't get committed
 - `main/app_main.c` — add `ip_announcer_init()` call before `net_dashboard_start()`
 - `main/control_task.c` — no changes (push task is independent)
 - `main/CMakeLists.txt` — add `ip_announcer` to REQUIRES
