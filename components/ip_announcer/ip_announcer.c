@@ -1,9 +1,11 @@
 #include "ip_announcer.h"
+#include "ip_announcer_priv.h"
 
 #include <string.h>
 #include <stdatomic.h>
 
 #include "esp_log.h"
+#include "esp_netif.h"
 #include "esp_random.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -129,6 +131,12 @@ esp_err_t ip_announcer_init(void)
     ESP_LOGI(TAG, "init: enable=%d topic=%s server=%s priority=%u",
              s_settings.enable, s_settings.topic, s_settings.server,
              s_settings.priority);
+
+    e = ip_announcer_push_init();
+    if (e != ESP_OK) {
+        ESP_LOGE(TAG, "push init failed: %s", esp_err_to_name(e));
+        return e;
+    }
     return ESP_OK;
 }
 
@@ -181,9 +189,39 @@ void ip_announcer_get_telemetry(ip_announcer_telemetry_t *out)
     xSemaphoreGive(s_lock);
 }
 
-// Push fn — wired in Phase 2.
 esp_err_t ip_announcer_test_push(void)
 {
-    ESP_LOGW(TAG, "test_push: not yet wired (Phase 2)");
-    return ESP_OK;
+    esp_netif_t *sta = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    if (!sta) return ESP_ERR_INVALID_STATE;
+    esp_netif_ip_info_t info = {0};
+    if (esp_netif_get_ip_info(sta, &info) != ESP_OK) return ESP_ERR_INVALID_STATE;
+    if (info.ip.addr == 0) return ESP_ERR_INVALID_STATE;
+    char ip[16];
+    snprintf(ip, sizeof(ip), IPSTR, IP2STR(&info.ip));
+    return ip_announcer_priv_enqueue_push(ip);
+}
+
+void ip_announcer_priv_get_settings(ip_announcer_settings_t *out)
+{
+    if (!out) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    *out = s_settings;
+    xSemaphoreGive(s_lock);
+}
+
+void ip_announcer_priv_set_telemetry(const ip_announcer_telemetry_t *t)
+{
+    if (!t) return;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_telemetry = *t;
+    // Persist last_ip on success so dedupe survives reboot.
+    if (t->status == IP_ANN_STATUS_OK && t->last_pushed_ip[0]) {
+        nvs_handle_t h;
+        if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+            nvs_set_str(h, NVS_KEY_LAST_IP, t->last_pushed_ip);
+            nvs_commit(h);
+            nvs_close(h);
+        }
+    }
+    xSemaphoreGive(s_lock);
 }
