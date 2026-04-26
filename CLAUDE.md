@@ -151,6 +151,13 @@ that panel's `getValue()` at commit time, and `setFromDevice` keeps
 `panel.current` locked to telemetry. Don't reintroduce a parallel cache
 ("just to avoid one extra read") — it WILL desync.
 
+The same posture extends to **IP announcement**: ntfy.sh push is
+fire-and-forget after every IP_EVENT_STA_GOT_IP, going through
+`ip_announcer_priv_enqueue_push` from the event handler. The push
+worker on a dedicated FreeRTOS task (priority 2, separate from
+control_task because HTTPS retries can hold the task ~15 s) drains
+the queue and updates the telemetry block atomically.
+
 ### 2. Components never depend on `main`
 
 ESP-IDF's `main` component cannot be a `REQUIRES` dependency. Shared types
@@ -524,6 +531,16 @@ hold user-tunable state that should survive reboot:
   `net_dashboard` so the WS status frame can serve current step values
   to all browser clients (no per-browser localStorage; the device is
   the source of truth).
+- `ip_announcer`: keys `enable` (u8), `topic` (str), `server` (str),
+  `priority` (u8), `last_ip` (str). Owned by the
+  `components/ip_announcer/` component, which is also referenced by
+  `net_dashboard` (status frame) and `captive_portal` (deeplink on
+  /success). Topic is resolved at first boot from NVS → Kconfig
+  `APP_IP_ANNOUNCER_TOPIC_DEFAULT` → random fallback, then persisted
+  back to NVS so subsequent boots skip the resolution. Placeholder
+  guard: topics matching `CHANGE-ME-*` / `fan-testkit-CHANGE*` or
+  shorter than 16 chars are refused at push-enqueue time, with a
+  red banner in the dashboard.
 
 All Save commands flow through `control_task` (CTRL_CMD_SAVE_RPM_PARAMS /
 SAVE_RPM_TIMEOUT / SAVE_PWM_FREQ / SAVE_UI_STEPS) and are reachable via

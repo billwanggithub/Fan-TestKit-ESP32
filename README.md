@@ -155,6 +155,17 @@ under *PSU driver* (separate menu).
   vendor-defined device` + `USB 序列裝置 (COMx)`. HID report IDs and
   CDC SLIP frame ops are defined in
   `components/usb_composite/include/usb_protocol.h`.
+- **IP Announcer (ntfy.sh push)** — opt-in feature that pushes the
+  device's IP to your phone via ntfy.sh after every Wi-Fi connection.
+  Solves the "Android Chrome can't resolve `fan-testkit.local` on a
+  phone hotspot with randomised subnet" problem. Install the ntfy
+  Android / iOS app, subscribe to your auto-generated topic (shown on
+  the captive-portal success page), enable from Settings → IP
+  Announcer in the dashboard. Topic resolution: NVS → Kconfig
+  `APP_IP_ANNOUNCER_TOPIC_DEFAULT` (set in `sdkconfig.defaults.local`
+  for personal multi-board builds) → random `fan-testkit-<32 chars>`
+  fallback. Topics matching `CHANGE-ME-*` or shorter than 16 chars
+  are refused at runtime to prevent placeholder leaks.
 
 ## Bench DC PSU (UART1)
 
