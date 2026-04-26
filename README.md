@@ -1,20 +1,28 @@
 # Fan-TestKit (ESP32-S3 PWM + RPM Capture)
 
 Firmware for the YD-ESP32-S3-COREBOARD V1.4 (ESP32-S3-WROOM-1, 16 MB flash,
-8 MB octal PSRAM). Generates a glitch-free PWM up to 1 MHz and captures
-tachometer RPM with a moving-averaged, configurable-timeout pipeline.
-Controllable from an Android phone via a Wi-Fi web dashboard (SoftAP
-captive portal for first-time setup) and from a PC host via USB composite
-(HID + CDC).
+8 MB octal PSRAM). Generates a glitch-free PWM up to 1 MHz, captures
+tachometer RPM with a moving-averaged, configurable-timeout pipeline,
+and drives a bench DC PSU (Riden RD60xx, XY-SK120, or WZ5005 — runtime
+selectable). Controllable from an Android phone via a Wi-Fi web
+dashboard (SoftAP captive portal for first-time setup) and from a PC
+host via USB composite (HID + CDC).
 
 The full design is in `C:\Users\billw\.claude\plans\read-the-project-plan-pure-eagle.md`.
 The release-hardening checklist is in `docs/release-hardening.md`.
 
-## Status (2026-04-22)
+## Status (2026-04-26)
 
-Migrated to **ESP-IDF v6.0** (was v5.5.1). PWM band-cross verified on
-scope; Wi-Fi provisioning, HTTP dashboard, WebSocket, USB composite
-(HID + CDC), PWM, RPM all working end-to-end on hardware.
+Multi-family PSU support landed: `psu_driver/` dispatches to one of
+three backends (`riden` / `xy_sk120` / `wz5005`) at boot, picked from
+NVS via the dashboard PSU panel's Family dropdown or the CLI
+`psu_family <name>`. Hardware verification still pending — see
+`HANDOFF.md` for the open D-series tasks.
+
+Earlier (2026-04-22): migrated to **ESP-IDF v6.0** (was v5.5.1). PWM
+band-cross verified on scope; Wi-Fi provisioning, HTTP dashboard,
+WebSocket, USB composite (HID + CDC), PWM, RPM all working end-to-end
+on hardware.
 
 Secure Boot V2 + Flash Encryption are **currently disabled** —
 they caused a boot loop on first power-on with the untouched eFuse set.
@@ -93,15 +101,20 @@ to **USB-OTG**. Logs still appear on UART0 via USB1 regardless.
 | 6    | RPM capture input                       |
 | 19   | USB D-  (reserved by board)             |
 | 20   | USB D+  (reserved by board)             |
+| 38   | UART1 TX → PSU RX                       |
+| 39   | UART1 RX ← PSU TX                       |
 | 48   | Onboard WS2812 RGB status LED           |
 
-All configurable under `idf.py menuconfig` -> *Fan-TestKit App*.
+PWM/RPM/LED pins configurable under `idf.py menuconfig` →
+*Fan-TestKit App*. PSU pins + baud + slave default + family choice
+under *PSU driver* (separate menu).
 
 ## Interacting with the device
 
 - **UART console** (USB1, CH343P): commands `pwm <freq> <duty>`,
-  `rpm_params <pole> <mavg>`, `rpm_timeout <us>`, `status`, `help`.
-  Baud rate is 115200.
+  `rpm_params <pole> <mavg>`, `rpm_timeout <us>`, `psu_v <volts>`,
+  `psu_i <amps>`, `psu_out <0|1>`, `psu_slave <addr>`,
+  `psu_family <name>`, `psu_status`, `status`, `help`. Baud is 115200.
 - **SoftAP captive portal** (first-time setup): on a board without
   stored Wi-Fi credentials, the device brings up an open AP named
   `Fan-TestKit-setup`. Join it from your phone and open **any** URL in
@@ -125,6 +138,41 @@ All configurable under `idf.py menuconfig` -> *Fan-TestKit App*.
   vendor-defined device` + `USB 序列裝置 (COMx)`. HID report IDs and
   CDC SLIP frame ops are defined in
   `components/usb_composite/include/usb_protocol.h`.
+
+## Bench DC PSU (UART1)
+
+The firmware drives a serial-controlled bench PSU on UART1 (GPIO 38
+TX, GPIO 39 RX, common GND). Three families are supported and
+selectable at runtime — same wiring for all of them, only the
+protocol changes:
+
+| Family | Protocol | Factory baud | Slave default |
+|--------|----------|--------------|---------------|
+| `riden` | Modbus-RTU (RD6006/RD6012/RD6018/RD6024) | 115200 | 1 |
+| `xy_sk120` | Modbus-RTU (XY-SK120) | 115200 | 1 |
+| `wz5005` | Custom 20-byte sum-checksum | 19200 | 1 |
+
+Workflow:
+
+1. Dashboard PSU panel → **Family** dropdown → pick family → **Save**
+   → **Reboot**. (Or CLI: `psu_family wz5005`, then power-cycle / reset.)
+2. Wire the PSU: ESP **GPIO 38** (TX) → PSU **RX**; ESP **GPIO 39**
+   (RX) ← PSU **TX**; **GND ↔ GND**. Don't connect VCC.
+3. Set the PSU's panel baud + slave to match firmware (or override the
+   firmware via `idf.py menuconfig` → *PSU driver*).
+4. WZ5005 only: panel must be in **COM** mode (not WIFI) — see manual
+   section 1.4.2.5 item 3.
+
+Boot log on success: `psu_driver: UART1 ready: family=X ... baud=Y
+slave=N` followed by `psu_<family>: detected ...`. Dashboard PSU panel
+shows green `link=up` within ~1 s.
+
+Family + slave are NVS-persisted (namespace `psu_driver`). Family change
+is **boot-effective** — the dashboard's Reboot button completes the
+swap. Hot-swap is intentionally not supported (different baud + framing
+per family makes mid-flight swaps risky).
+
+Full wiring guide + failure modes: [docs/Power_Supply_Module.md](docs/Power_Supply_Module.md).
 
 ## Factory reset (re-provisioning Wi-Fi)
 
@@ -153,17 +201,23 @@ a re-flash clears all NVS.
 
 ## Repository layout
 
-```
+```text
 main/                      app_main, control_task, UART CLI, Kconfig
 components/
   app_api/                 cross-component ctrl_cmd_t header
   pwm_gen/                 MCPWM generator
   rpm_cap/                 MCPWM capture + converter + averager
+  gpio_io/                 GPIO IO + relay power switch
+  psu_driver/              UART1 PSU dispatcher + 3 backends (riden, xy_sk120, wz5005)
+                           shared psu_modbus_rtu helpers (CRC-16 + FC 0x03/0x06)
   usb_composite/           TinyUSB HID + CDC + log redirect
   net_dashboard/           SoftAP captive portal + HTTP + WebSocket + mDNS + web UI
   ota_core/                shared esp_ota_* writer (Wi-Fi + USB frontends)
 docs/
+  Power_Supply_Module.md   PSU wiring + family selection user guide
   release-hardening.md     irreversible eFuse checklist
+  superpowers/specs/       design specs (one per feature)
+  superpowers/plans/       implementation plans (one per feature)
 partitions.csv             factory + ota_0 + ota_1 + spiffs + nvs(_keys)
 sdkconfig.defaults         target, PSRAM, TinyUSB HID+CDC, mDNS
                            (Secure Boot + Flash Enc currently off;

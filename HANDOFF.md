@@ -1,9 +1,121 @@
 # Hand-off — Fan-TestKit firmware (ESP32-S3 PWM + RPM)
 
-Date: 2026-04-22 (晚間，IDF v6.0 migration)
-Branch: `chore/migrate-idf-v6.0` (off `feat/pwm-1hz-floor`)
+Date: 2026-04-26 (PSU multi-family driver landed in firmware)
+Branch: `feature/psu-modbus-rtu` (HEAD `53a1936`, ahead of `main` by 16 commits)
 Working dir: `D:\github\Fan-TestKit-ESP32`
-IDF: `C:\esp\v6.0\esp-idf` (was `C:\Espressif\frameworks\esp-idf-v5.5.1`)
+IDF: `C:\esp\v6.0\esp-idf`
+
+## 2026-04-26 — PSU multi-family driver (riden / xy_sk120 / wz5005)
+
+Renamed `components/psu_modbus/` → `components/psu_driver/` and split
+into a vtable dispatcher + 3 backends behind a runtime-selectable
+`psu_family` NVS key. Spec: `docs/superpowers/specs/2026-04-26-psu-multi-driver-design.md`.
+Plan: `docs/superpowers/plans/2026-04-26-psu-multi-driver.md`.
+
+Layout after the work:
+
+```text
+components/psu_driver/
+  psu_driver.c          dispatcher + atomic state + NVS + UART setup
+  psu_modbus_rtu.{c,h}  shared CRC-16 + FC 0x03/0x06 helpers
+  psu_riden.c           Riden RD60xx register map + RD_MODELS table
+  psu_xy_sk120.c        XY-SK120 register map (model id 22873)
+  psu_wz5005.c          WZ5005 custom 20-byte sum-mod-256 framing
+  include/psu_driver.h         public API
+  include/psu_backend.h        internal vtable + publish helpers
+  include/psu_modbus_rtu.h     shared Modbus helper API
+  Kconfig.projbuild     family choice + per-family factory baud defaults
+```
+
+Family selection surface:
+
+- **Dashboard PSU panel**: Family `<select>` + Save + Reboot (the
+  family/slave/Reboot row stays clickable even when `link=down`,
+  which is the escape hatch when the wrong family is selected — see
+  `a358aa3` for the CSS-scope fix).
+- **CLI**: `psu_family <name>` (`riden|xy_sk120|wz5005`). No-arg
+  prints current.
+- **WS op**: `{type:"set_psu_family", family:"..."}` and `{type:"reboot"}`.
+- **NVS**: namespace `psu_driver`, key `family` (alongside existing
+  `slave_addr`). Boot-effective — change requires reboot.
+
+Per-family factory baud defaults (Kconfig):
+
+- `riden` 115200, `xy_sk120` 115200, `wz5005` 19200. If a bench unit
+  is panel-keyed differently, override `APP_PSU_UART_BAUD` via
+  menuconfig (after `del sdkconfig`).
+
+### Open hardware verification (D-series tasks)
+
+Software verified by build (`fan_testkit.bin` ~0x10c640 bytes, 48%
+free in 2 MB partition). On-hardware verification per the plan's
+Phase D **not yet done** by user — needs:
+
+- **D1 Riden regression**: with bench RD6006 panel-keyed to 19200,
+  override `APP_PSU_UART_BAUD=19200`, reflash, confirm
+  `family=riden` log + dashboard `link=up` + V/I sliders work.
+- **D2 XY-SK120 acceptance**: switch family via dashboard, set baud
+  to 115200, wire SK120, verify model id 22873 detected.
+- **D3 WZ5005 acceptance**: critical — confirm V_SET 5.00 → terminals
+  read 5.00 V. The 0x2B/0x2C byte-layout in `psu_wz5005.c:wz_read_vi_block`
+  is **best-guess** (V_SET 0..1, I_SET 2..3, V_OUT 8..9, I_OUT 10..11);
+  if values come back wrong, capture a scope trace and adjust the
+  offsets in that one function. Spec design doc lists this as a known
+  unknown.
+- **D4 Wrong-family graceful failure**: with WZ5005 wired, set
+  family=riden via dashboard → reboot → confirm `link=down` within
+  ~1 s + UI shows offline + no crash. Then back to `family=wz5005`
+  → reboot → recovers.
+
+### Notable decisions
+
+- **Family choice is boot-effective, not hot-swappable.** Different
+  baud rates per family + different framers + cached state (especially
+  WZ5005's `s_last_vi[16]` for read-modify-write) make mid-flight
+  swaps risky. Reboot path is ~2 s and the dashboard has a Reboot
+  button next to the family Save, so UX cost is small.
+- **WZ5005 layout is best-guess.** The kordian-kowalski reference and
+  the manufacturer manual both leave the 0x2B/0x2C byte offsets
+  un-documented. We picked the most plausible layout (V_SET hi/lo
+  at bytes 0..1, etc.) per spec analysis. Wrong layout would surface
+  as visible drift between dashboard and front panel — `link_ok`
+  stays true (structural validity OK) but values are wrong.
+- **No boot-time CRC self-check** (matches existing Riden posture);
+  WZ5005's sum-mod-256 ditto. Constructors run before `ESP_LOG` is
+  up — silent traps are debug-hostile. End-to-end via `link_ok`
+  is the real test.
+- **NVS namespace migration**: old `psu_modbus` → new `psu_driver`.
+  Existing devices' slave_addr in the old namespace is ignored on
+  first boot of the new firmware; falls back to
+  `CONFIG_APP_PSU_SLAVE_DEFAULT` (1). Operator with a non-default
+  slave runs `psu_slave N` once after upgrade. Documented in commit
+  `37ec4e8` body.
+
+### Commit chain on `feature/psu-modbus-rtu`
+
+```text
+53a1936 docs(psu): write user-facing connection guide
+a358aa3 fix(dashboard): keep PSU family/slave/reboot row clickable when link=down
+6faa118 docs(claude): update PSU section for multi-driver
+36abc35 feat(dashboard): PSU family dropdown + reboot button
+51cc9df feat(ws): add family + set_psu_family + reboot ops
+0cb9aeb feat(cli): add psu_family get/set command
+d5b8b1d feat(psu_driver): Kconfig family choice + per-family baud
+d973dd3 docs(psu_wz5005): restore status-byte rationale comment
+3761a5f feat(psu_driver): implement WZ5005 backend
+7ee7be4 feat(psu_driver): implement XY-SK120 backend
+1edaac9 refactor(psu_driver): vtable dispatch + extract psu_riden.c
+2269da9 refactor(psu_driver): extract psu_modbus_rtu.{c,h}
+42a72d5 feat(psu_driver): add internal psu_backend.h vtable
+8155af1 refactor(psu): delete psu_modbus/, move Kconfig to psu_driver/
+710377c refactor(psu): redirect every caller psu_modbus → psu_driver
+37ec4e8 feat(psu_driver): copy psu_modbus.c body verbatim w/ rename
+eff8dc0 docs(psu_driver): preserve API contract comments
+207f69b feat(psu_driver): scaffold new component (skeleton)
+f36e290 docs(plan): PSU multi-driver implementation plan
+e85d267 docs(spec): set Riden Kconfig default baud to factory 115200
+a636be5 docs(spec): PSU multi-driver design
+```
 
 ## 2026-04-22 — provisioning migration: BLE → SoftAP captive portal
 
