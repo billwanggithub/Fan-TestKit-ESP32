@@ -86,6 +86,12 @@ static esp_err_t wz_txn(uint8_t op, const uint8_t *args, size_t arg_len,
     if (resp[0] != WZ_HEADER)      { e = ESP_ERR_INVALID_RESPONSE; goto out; }
     if (resp[1] != req[1])         { e = ESP_ERR_INVALID_RESPONSE; goto out; }
     if (!wz_verify_checksum(resp)) { e = ESP_ERR_INVALID_CRC;      goto out; }
+    // Per WZ5005 manual: a status byte of 0x80 in the response = OK,
+    // 0x90/0xA0/0xB0/0xC0/0xD0 = error. The byte position is op-dependent
+    // and not authoritatively documented; we treat structural validity
+    // (header + addr + checksum) as success and let the caller interpret
+    // payload semantics. Field-incorrect frames will surface as drift in
+    // telemetry vs front-panel display, not as link_ok=false.
     if (resp_args && resp_args_len) {
         size_t n = (resp_args_len > 16) ? 16 : resp_args_len;
         memcpy(resp_args, &resp[3], n);
