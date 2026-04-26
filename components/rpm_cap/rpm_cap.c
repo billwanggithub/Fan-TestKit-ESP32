@@ -11,6 +11,13 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+
+#define NVS_NAMESPACE      "rpm_cap"
+#define NVS_KEY_POLE       "pole"
+#define NVS_KEY_MAVG       "mavg"
+#define NVS_KEY_TIMEOUT    "timeout_us"
 
 #define CAP_SRC_CLK_HZ 160000000u
 #define FREQ_FIFO_LEN  128
@@ -285,6 +292,27 @@ size_t rpm_cap_drain_history(float *dst, size_t max)
     return n;
 }
 
+// Override cfg defaults with NVS values if present. Keys missing → keep cfg
+// defaults silently (first boot path). Read errors other than NOT_FOUND are
+// logged but non-fatal — we always have safe defaults.
+static void load_nvs_overrides(uint8_t *pole, uint16_t *mavg, uint32_t *timeout_us)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
+    if (e == ESP_ERR_NVS_NOT_FOUND) return;
+    if (e != ESP_OK) {
+        ESP_LOGW(TAG, "nvs_open ro failed: %s", esp_err_to_name(e));
+        return;
+    }
+    uint8_t  v_pole = *pole;
+    uint16_t v_mavg = *mavg;
+    uint32_t v_to   = *timeout_us;
+    if (nvs_get_u8 (h, NVS_KEY_POLE,    &v_pole) == ESP_OK && v_pole != 0) *pole       = v_pole;
+    if (nvs_get_u16(h, NVS_KEY_MAVG,    &v_mavg) == ESP_OK && v_mavg != 0) *mavg       = v_mavg;
+    if (nvs_get_u32(h, NVS_KEY_TIMEOUT, &v_to)   == ESP_OK && v_to >= 1000) *timeout_us = v_to;
+    nvs_close(h);
+}
+
 esp_err_t rpm_cap_init(const rpm_cap_config_t *cfg)
 {
     if (!cfg) return ESP_ERR_INVALID_ARG;
@@ -292,12 +320,14 @@ esp_err_t rpm_cap_init(const rpm_cap_config_t *cfg)
 
     memset(&s_cap, 0, sizeof(s_cap));
     s_cap.input_gpio = cfg->input_gpio;
-    atomic_store_explicit(&s_cap.pole_count,
-        cfg->pole_count ? cfg->pole_count : 2, memory_order_relaxed);
-    atomic_store_explicit(&s_cap.moving_avg_count,
-        cfg->moving_avg_count ? cfg->moving_avg_count : 16, memory_order_relaxed);
-    atomic_store_explicit(&s_cap.rpm_timeout_us,
-        cfg->rpm_timeout_us ? cfg->rpm_timeout_us : 1000000u, memory_order_relaxed);
+
+    uint8_t  pole       = cfg->pole_count       ? cfg->pole_count       : 2;
+    uint16_t mavg       = cfg->moving_avg_count ? cfg->moving_avg_count : 16;
+    uint32_t timeout_us = cfg->rpm_timeout_us   ? cfg->rpm_timeout_us   : 1000000u;
+    load_nvs_overrides(&pole, &mavg, &timeout_us);
+    atomic_store_explicit(&s_cap.pole_count,       pole,       memory_order_relaxed);
+    atomic_store_explicit(&s_cap.moving_avg_count, mavg,       memory_order_relaxed);
+    atomic_store_explicit(&s_cap.rpm_timeout_us,   timeout_us, memory_order_relaxed);
 
     mcpwm_capture_timer_config_t cap_timer_cfg = {
         .group_id   = 0,
@@ -348,4 +378,34 @@ esp_err_t rpm_cap_init(const rpm_cap_config_t *cfg)
              (unsigned)atomic_load(&s_cap.moving_avg_count),
              atomic_load(&s_cap.rpm_timeout_us));
     return ESP_OK;
+}
+
+esp_err_t rpm_cap_save_params_to_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    uint8_t  p = atomic_load_explicit(&s_cap.pole_count,       memory_order_relaxed);
+    uint16_t m = atomic_load_explicit(&s_cap.moving_avg_count, memory_order_relaxed);
+    esp_err_t e1 = nvs_set_u8 (h, NVS_KEY_POLE, p);
+    esp_err_t e2 = nvs_set_u16(h, NVS_KEY_MAVG, m);
+    if (e1 == ESP_OK && e2 == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+    if (e1 != ESP_OK) return e1;
+    if (e2 != ESP_OK) return e2;
+    ESP_LOGI(TAG, "saved to NVS: pole=%u mavg=%u", p, m);
+    return ESP_OK;
+}
+
+esp_err_t rpm_cap_save_timeout_to_nvs(void)
+{
+    nvs_handle_t h;
+    esp_err_t e = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (e != ESP_OK) return e;
+    uint32_t t = atomic_load_explicit(&s_cap.rpm_timeout_us, memory_order_relaxed);
+    e = nvs_set_u32(h, NVS_KEY_TIMEOUT, t);
+    if (e == ESP_OK) nvs_commit(h);
+    nvs_close(h);
+    if (e == ESP_OK) ESP_LOGI(TAG, "saved to NVS: timeout_us=%" PRIu32, t);
+    return e;
 }

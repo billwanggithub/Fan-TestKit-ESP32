@@ -20,6 +20,12 @@ esp_err_t rpm_cap_init(const rpm_cap_config_t *cfg);
 esp_err_t rpm_cap_set_params(uint8_t pole_count, uint16_t moving_avg_count);
 esp_err_t rpm_cap_set_timeout(uint32_t timeout_us);
 
+// Persist current live pole_count + moving_avg_count to NVS. Survives reboot.
+esp_err_t rpm_cap_save_params_to_nvs(void);
+
+// Persist current live rpm_timeout_us to NVS. Survives reboot.
+esp_err_t rpm_cap_save_timeout_to_nvs(void);
+
 float  rpm_cap_get_latest(void);
 size_t rpm_cap_drain_history(float *dst, size_t max);
 
