@@ -22,8 +22,9 @@ Pins reserved by hardware: **19, 20** (USB). Strapping pins to avoid for
 critical outputs: 0 (BOOT), 3 (USB-JTAG select), 45, 46. Onboard WS2812
 RGB LED is on GPIO48.
 
-UART1 (PSU Modbus) defaults to GPIO 38 (TX) / 39 (RX) at 19200-8N1; both
-are Kconfig-overridable.
+UART1 (PSU bus) defaults to GPIO 38 (TX) / 39 (RX); 8N1; baud is
+family-dependent (Riden 115200, XY-SK120 115200, WZ5005 19200) and
+Kconfig-overridable. See `docs/Power_Supply_Module.md` for wiring.
 
 ## Build & flash workflow (Windows)
 
