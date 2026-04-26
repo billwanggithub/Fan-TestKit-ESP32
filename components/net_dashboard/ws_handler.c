@@ -5,6 +5,7 @@
 
 #include "esp_http_server.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "cJSON.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -167,6 +168,21 @@ static void handle_json(cJSON *root, int fd)
             .psu_set_slave = { .addr = (uint8_t)v },
         };
         control_task_post(&c, 0);
+    } else if (strcmp(type_j->valuestring, "set_psu_family") == 0) {
+        const cJSON *fam = cJSON_GetObjectItem(root, "family");
+        if (!cJSON_IsString(fam)) return;
+        esp_err_t e = psu_driver_set_family(fam->valuestring);
+        char ack[96];
+        snprintf(ack, sizeof(ack),
+                 "{\"type\":\"ack\",\"op\":\"set_psu_family\",\"ok\":%s}",
+                 e == ESP_OK ? "true" : "false");
+        ws_send_json_to(fd, ack);
+    } else if (strcmp(type_j->valuestring, "reboot") == 0) {
+        ESP_LOGW(TAG, "reboot requested via ws fd=%d", fd);
+        ws_send_json_to(fd, "{\"type\":\"ack\",\"op\":\"reboot\"}");
+        // 200 ms grace for the ack to flush, mirror of factory_reset
+        vTaskDelay(pdMS_TO_TICKS(200));
+        esp_restart();
     } else if (strcmp(type_j->valuestring, "factory_reset") == 0) {
         ESP_LOGW(TAG, "factory_reset requested via ws fd=%d", fd);
         ws_send_json_to(fd, "{\"type\":\"ack\",\"op\":\"factory_reset\"}");
@@ -245,13 +261,14 @@ static void telemetry_task(void *arg)
         if (n < (int)sizeof(payload)) {
             n += snprintf(payload + n, sizeof(payload) - n,
                 ",\"psu\":{\"v_set\":%.2f,\"i_set\":%.3f,\"v_out\":%.2f,\"i_out\":%.3f,"
-                "\"output\":%s,\"link\":%s,\"model\":\"%s\",\"slave\":%u}",
+                "\"output\":%s,\"link\":%s,\"model\":\"%s\",\"slave\":%u,\"family\":\"%s\"}",
                 (double)pt.v_set, (double)pt.i_set,
                 (double)pt.v_out, (double)pt.i_out,
                 pt.output_on ? "true" : "false",
                 pt.link_ok   ? "true" : "false",
                 psu_driver_get_model_name(),
-                psu_driver_get_slave_addr());
+                psu_driver_get_slave_addr(),
+                psu_driver_get_family());
         }
         if (n < (int)sizeof(payload)) {
             n += snprintf(payload + n, sizeof(payload) - n, "}");
