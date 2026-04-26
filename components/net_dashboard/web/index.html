@@ -43,7 +43,6 @@
         <label for="timeout_us" data-i18n="timeout_us">Timeout (µs)</label>
         <input id="timeout_us" type="number" min="1000" value="1000000" />
       </div>
-      <button id="apply_rpm" class="btn-primary" data-i18n="apply_rpm">Apply RPM</button>
     </div>
 
     <div class="settings-section">
@@ -55,10 +54,6 @@
         <label for="freq-step" data-i18n="freq_step">Frequency step (Hz)</label>
         <input id="freq-step" type="number" step="1" min="1" value="10" />
       </div>
-      <div class="settings-row">
-        <button id="save-ui-steps-btn" data-i18n="save">Save</button>
-        <span id="save-ui-steps-status" class="save-status"></span>
-      </div>
       <p class="settings-hint" data-i18n="step_hint">Step sizes apply immediately to the slider step on the Duty / Frequency panels.</p>
     </div>
 
@@ -68,7 +63,11 @@
         <label for="pulse-width-ms" data-i18n="pulse_width_label">Pulse width (ms)</label>
         <input id="pulse-width-ms" type="number" min="1" max="10000" value="100" />
       </div>
-      <button id="apply_pulse_width" class="btn-primary" data-i18n="apply_pulse_width">Apply</button>
+    </div>
+
+    <div class="settings-row">
+      <button id="save-all-btn" data-i18n="save">Save</button>
+      <span id="save-all-status" class="save-status"></span>
     </div>
   </details>
 

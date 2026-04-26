@@ -14,7 +14,6 @@
       pole_count: 'Pole count',
       avg_window: 'Avg window',
       timeout_us: 'Timeout (µs)',
-      apply_rpm: 'Apply RPM',
       step_sizes: 'Step sizes',
       duty_step: 'Duty step (%)',
       freq_step: 'Frequency step (Hz)',
@@ -72,7 +71,6 @@
       gpio_value_label: 'value:',
       gpio_output_section: 'GPIO output',
       pulse_width_label: 'Pulse width (ms)',
-      apply_pulse_width: 'Apply',
       help_pin_power: 'Power-switch:',
       help_pin_group_a: 'GPIO Group A:',
       help_pin_group_b: 'GPIO Group B:',
@@ -101,7 +99,6 @@
       pole_count: '極數',
       avg_window: '平均視窗',
       timeout_us: '逾時 (µs)',
-      apply_rpm: '套用轉速設定',
       step_sizes: '步進量',
       duty_step: '工作週期步進 (%)',
       freq_step: '頻率步進 (Hz)',
@@ -159,7 +156,6 @@
       gpio_value_label: '值：',
       gpio_output_section: 'GPIO 輸出',
       pulse_width_label: '脈衝寬度 (ms)',
-      apply_pulse_width: '套用',
       help_pin_power: '電源開關：',
       help_pin_group_a: 'GPIO A 組：',
       help_pin_group_b: 'GPIO B 組：',
@@ -188,7 +184,6 @@
       pole_count: '极数',
       avg_window: '平均窗口',
       timeout_us: '超时 (µs)',
-      apply_rpm: '应用转速设置',
       step_sizes: '步进量',
       duty_step: '占空比步进 (%)',
       freq_step: '频率步进 (Hz)',
@@ -246,7 +241,6 @@
       gpio_value_label: '值：',
       gpio_output_section: 'GPIO 输出',
       pulse_width_label: '脉冲宽度 (ms)',
-      apply_pulse_width: '应用',
       help_pin_power: '电源开关：',
       help_pin_group_a: 'GPIO A 组：',
       help_pin_group_b: 'GPIO B 组：',
@@ -863,10 +857,8 @@
     if (document.activeElement === pulseWidthEl) return;
     if (pulseWidthEl.value !== String(ms)) pulseWidthEl.value = String(ms);
   }
-  const applyPulseBtn = document.getElementById('apply_pulse_width');
-  if (applyPulseBtn) {
-    applyPulseBtn.addEventListener('click', () => {
-      if (!pulseWidthEl) return;
+  if (pulseWidthEl) {
+    pulseWidthEl.addEventListener('change', () => {
       const n = parseInt(pulseWidthEl.value, 10);
       if (!isFinite(n) || n < 1 || n > 10000) {
         pulseWidthEl.value = '100';
@@ -1026,22 +1018,46 @@
     }
   }
 
-  // Save button — commits both step inputs to NVS via save_ui_steps WS op.
+  // Unified Save — commits ALL NVS-backed settings in one click.
+  // Sends four save commands back-to-back; ack-handler shows aggregate
+  // success only after all four acks return ok=true.
   (() => {
-    const btn       = document.getElementById('save-ui-steps-btn');
-    const statusEl  = document.getElementById('save-ui-steps-status');
+    const btn      = document.getElementById('save-all-btn');
+    const statusEl = document.getElementById('save-all-status');
     if (!btn) return;
+    let pending = 0;
+    let allOk   = true;
+    function setStatus(text) {
+      if (!statusEl) return;
+      statusEl.textContent = text;
+      if (text) setTimeout(() => { if (statusEl.textContent === text) statusEl.textContent = ''; }, 3000);
+    }
     btn.addEventListener('click', () => {
+      if (ws.readyState !== WebSocket.OPEN) {
+        setStatus('Not connected');
+        return;
+      }
       const duty = parseFloat(document.getElementById('duty-step').value);
       const freq = parseInt(document.getElementById('freq-step').value, 10);
       if (!(duty > 0) || !(freq > 0)) {
-        if (statusEl) statusEl.textContent = 'invalid input';
+        setStatus('Invalid step sizes');
         return;
       }
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'save_ui_steps', duty_step: duty, freq_step: freq }));
-      }
+      pending = 4;
+      allOk   = true;
+      setStatus('Saving...');
+      ws.send(JSON.stringify({ type: 'save_rpm_params' }));
+      ws.send(JSON.stringify({ type: 'save_rpm_timeout' }));
+      ws.send(JSON.stringify({ type: 'save_pwm_freq' }));
+      ws.send(JSON.stringify({ type: 'save_ui_steps', duty_step: duty, freq_step: freq }));
     });
+    // Expose for the ack-handler to count down.
+    window.__saveAllAck = (op, ok) => {
+      if (pending <= 0) return;
+      if (!ok) allOk = false;
+      pending--;
+      if (pending === 0) setStatus(allOk ? 'Saved' : 'Failed');
+    };
   })();
 
   // ---------- WebSocket dispatch ----------
@@ -1064,28 +1080,28 @@
         if (msg.op === 'factory_reset') {
           const fs = document.getElementById('factory_reset_status');
           if (fs) fs.textContent = t('factory_acked');
-        } else if (msg.op === 'save_ui_steps') {
-          const el = document.getElementById('save-ui-steps-status');
-          if (el) {
-            el.textContent = msg.ok ? 'Saved' : 'Failed';
-            setTimeout(() => { if (el) el.textContent = ''; }, 3000);
-          }
+        } else if (msg.op === 'save_rpm_params' || msg.op === 'save_rpm_timeout' ||
+                   msg.op === 'save_pwm_freq'   || msg.op === 'save_ui_steps') {
+          if (window.__saveAllAck) window.__saveAllAck(msg.op, !!msg.ok);
         }
       }
     } catch (e) { /* ignore non-JSON / partial frames */ }
   });
 
-  // ---------- RPM apply (existing contract) ----------
-  // Inputs (#pole, #mavg, #timeout_us) now live in the unified Settings panel,
-  // but the IDs and WS contract are unchanged.
-  document.getElementById('apply_rpm').addEventListener('click', () => {
+  // ---------- RPM apply on change ----------
+  // Inputs (#pole, #mavg, #timeout_us) live in the unified Settings panel.
+  // Each value applies live (set_rpm) on change; persistence happens via
+  // the unified Save button below.
+  function sendSetRpm() {
+    if (ws.readyState !== WebSocket.OPEN) return;
     const pole = parseInt(document.getElementById('pole').value, 10);
     const mavg = parseInt(document.getElementById('mavg').value, 10);
     const timeout_us = parseInt(document.getElementById('timeout_us').value, 10);
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'set_rpm', pole, mavg, timeout_us }));
-    }
-  });
+    ws.send(JSON.stringify({ type: 'set_rpm', pole, mavg, timeout_us }));
+  }
+  document.getElementById('pole').addEventListener('change', sendSetRpm);
+  document.getElementById('mavg').addEventListener('change', sendSetRpm);
+  document.getElementById('timeout_us').addEventListener('change', sendSetRpm);
 
   // ---------- OTA ----------
   document.getElementById('upload').addEventListener('click', async () => {
