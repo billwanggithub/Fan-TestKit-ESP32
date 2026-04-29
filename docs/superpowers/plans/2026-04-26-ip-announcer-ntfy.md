@@ -464,14 +464,20 @@ esp_err_t ip_announcer_test_push(void)
 
 - [ ] **Step 5: Add `ip_announcer` to `main/CMakeLists.txt` REQUIRES**
 
-Open `main/CMakeLists.txt`, find the `REQUIRES` clause (it lists components like `app_api`, `gpio_io`, `pwm_gen`, etc.), and add `ip_announcer`.
+Open `main/CMakeLists.txt`, find the `REQUIRES` clause (it lists components like `app_api`, `gpio_io`, `pwm_gen`, etc.), and add **both** `ip_announcer` and `esp_netif` (the latter is needed for the `esp_netif_init` call in Step 6).
 
 - [ ] **Step 6: Wire `ip_announcer_init()` in `app_main`**
 
-Edit `main/app_main.c`. Find the existing `ESP_ERROR_CHECK(ui_settings_init());` line. Add the new init call **immediately after `ui_settings_init` and before `usb_composite_start` / `net_dashboard_start`**:
+Edit `main/app_main.c`. Find the existing `ESP_ERROR_CHECK(ui_settings_init());` line. The default event loop must exist before `ip_announcer_init` runs (otherwise `esp_event_handler_register` returns `ESP_ERR_INVALID_STATE` and the handler never registers — see HANDOFF.md 2026-04-29). Add **all three** init calls **immediately after `ui_settings_init` and before `usb_composite_start` / `net_dashboard_start`**:
 
 ```c
 ESP_ERROR_CHECK(ui_settings_init());
+
+// Bring up esp_netif + the default event loop here (instead of inside
+// provisioning) so any component that wants to register on IP_EVENT /
+// WIFI_EVENT *before* the Wi-Fi driver starts can do so.
+ESP_ERROR_CHECK(esp_netif_init());
+ESP_ERROR_CHECK(esp_event_loop_create_default());
 
 // IP Announcer must init BEFORE net_dashboard so its IP_EVENT
 // handler is registered before provisioning fires the first
@@ -479,9 +485,13 @@ ESP_ERROR_CHECK(ui_settings_init());
 ESP_ERROR_CHECK(ip_announcer_init());
 ```
 
-Add the include near the top of the file alongside the other component headers:
+Then in `components/net_dashboard/provisioning.c`, **remove** the existing `ESP_ERROR_CHECK(esp_netif_init());` and `ESP_ERROR_CHECK(esp_event_loop_create_default());` calls at the top of `provisioning_run_and_connect` — they are now done in app_main, and double-init would error.
+
+Add the includes near the top of `app_main.c` alongside the other component headers:
 
 ```c
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "ip_announcer.h"
 ```
 
@@ -920,13 +930,14 @@ Add the event handler at the end of `ip_announcer_init` (after `ip_announcer_pus
 ```c
     extern void ip_announcer_on_ip_event(void *arg, esp_event_base_t base,
                                          int32_t id, void *data);
+    // The default event loop must already exist when we get here — app_main
+    // calls esp_event_loop_create_default() before ip_announcer_init().
+    // ESP_ERR_INVALID_STATE here means the loop is missing, which would
+    // make the handler registration silently no-op and we'd never push on
+    // cold boot. Treat it as fatal so the misordering surfaces immediately.
     esp_err_t reg_e = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                  ip_announcer_on_ip_event, NULL);
-    if (reg_e == ESP_ERR_INVALID_STATE) {
-        // Default loop already created by provisioning. Some IDF versions
-        // surface this; ignore — handler still registers via the existing loop.
-        ESP_LOGD(TAG, "esp_event_handler_register: default loop already exists");
-    } else if (reg_e != ESP_OK) {
+    if (reg_e != ESP_OK) {
         ESP_LOGE(TAG, "event handler register failed: %s",
                  esp_err_to_name(reg_e));
         return reg_e;

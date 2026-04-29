@@ -13,6 +13,7 @@ idf_component_register(
                 ui_settings
                 ip_announcer
                 esp_event
+                esp_netif
                 esp_timer
                 console
                 driver

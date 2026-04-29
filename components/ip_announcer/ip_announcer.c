@@ -176,13 +176,14 @@ esp_err_t ip_announcer_init(void)
         return e;
     }
 
+    // The default event loop must already exist when we get here — app_main
+    // calls esp_event_loop_create_default() before ip_announcer_init().
+    // ESP_ERR_INVALID_STATE here means the loop is missing, which would
+    // make the handler registration silently no-op and we'd never push on
+    // cold boot. Treat it as fatal so the misordering surfaces immediately.
     esp_err_t reg_e = esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP,
                                                  ip_announcer_on_ip_event, NULL);
-    if (reg_e == ESP_ERR_INVALID_STATE) {
-        // Default loop already created by provisioning. Some IDF versions
-        // surface this; ignore — handler still registers via the existing loop.
-        ESP_LOGD(TAG, "esp_event_handler_register: default loop already exists");
-    } else if (reg_e != ESP_OK) {
+    if (reg_e != ESP_OK) {
         ESP_LOGE(TAG, "event handler register failed: %s",
                  esp_err_to_name(reg_e));
         return reg_e;

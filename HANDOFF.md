@@ -1,9 +1,56 @@
 # Hand-off — Fan-TestKit firmware (ESP32-S3 PWM + RPM)
 
-Date: 2026-04-26 (RPM chart auto-scale; PWM band-cross root-caused; PSU multi-family landed)
-Branch: `feature/psu-modbus-rtu` (HEAD `53a1936`, ahead of `main` by 16 commits)
+Date: 2026-04-29 (cold-boot ntfy push silently dropped — fixed)
+Branch: `main`
 Working dir: `D:\github\Fan-TestKit-ESP32`
 IDF: `C:\esp\v6.0\esp-idf`
+
+## 2026-04-29 — Cold-boot IP announcer push never fired (event-loop ordering)
+
+Symptom: every cold boot, `prov: got ip: ...` printed in the monitor but
+no ntfy push went out. `ip_announcer_push: ...` log lines that should
+follow were absent. Hot-boot (factory reset → reprovision in same power
+cycle) actually pushed correctly, which masked the bug for a while.
+
+Root cause (in `components/ip_announcer/ip_announcer.c`): the IP_EVENT
+handler was never actually registered. `app_main` correctly called
+`ip_announcer_init()` *before* `net_dashboard_start()` so the handler
+would exist before provisioning fired the first IP_EVENT_STA_GOT_IP.
+But `esp_event_loop_create_default()` was buried inside
+`provisioning_run_and_connect()` (`components/net_dashboard/provisioning.c`),
+which ran *after* `ip_announcer_init()`. IDF v6.0
+`esp_event_handler_register` returns `ESP_ERR_INVALID_STATE` when the
+default loop hasn't been created yet (see
+`components/esp_event/default_event_loop.c:20`). The old ip_announcer
+code interpreted that error as "loop already exists, harmless" and
+swallowed it via `ESP_LOGD` — which doesn't print at the default log
+level. Net result: register call returned without registering, no log,
+no push.
+
+`prov: got ip` still printed because `provisioning.c` registered its
+*own* IP_EVENT handler **after** creating the default loop, so prov
+saw the event. Only ip_announcer was blind.
+
+Fix (4 files):
+
+- `main/app_main.c`: hoist `esp_netif_init()` + `esp_event_loop_create_default()`
+  to run *before* `ip_announcer_init()`. Also added `esp_event.h` /
+  `esp_netif.h` includes.
+- `main/CMakeLists.txt`: add `esp_netif` to REQUIRES.
+- `components/net_dashboard/provisioning.c`: remove the duplicate
+  `esp_netif_init` / `esp_event_loop_create_default` calls (now in app_main).
+- `components/ip_announcer/ip_announcer.c`: remove the bogus
+  "INVALID_STATE means already-exists" branch — INVALID_STATE here is
+  fatal (loop missing), so a future re-misordering will abort at
+  `ESP_ERROR_CHECK` instead of silently dropping the push.
+
+Verified on hardware: cold boot now logs
+`ip_announcer: IP <addr> — enqueueing push` immediately after
+`prov: got ip:`, ntfy notification arrives.
+
+Lesson: never `LOGD` an error you didn't actually understand. If a
+return value's semantics are unclear, look up the IDF source before
+assuming it's benign.
 
 ## 2026-04-26 — NVS-persisted runtime settings
 

@@ -204,6 +204,9 @@ for up to ~15 s during retries; that would block setpoint commands.
 ### Boot ordering (in `app_main`)
 
 ```c
+ESP_ERROR_CHECK(esp_netif_init());
+ESP_ERROR_CHECK(esp_event_loop_create_default());
+
 ESP_ERROR_CHECK(ip_announcer_init());      // before net_dashboard_start()
                                            // so the IP_EVENT handler is
                                            // registered before
@@ -213,13 +216,24 @@ ESP_ERROR_CHECK(net_dashboard_start());
 ```
 
 `ip_announcer_init` registers an `IP_EVENT_STA_GOT_IP` handler with the
-default event loop and creates the push task. The default event loop
-is already created by `provisioning.c` (`esp_event_loop_create_default`),
-which `net_dashboard_start` calls into. To avoid a duplicate-create error
-we either (a) move `esp_event_loop_create_default` out of provisioning
-into `app_main` proper, or (b) detect `ESP_ERR_INVALID_STATE` and
-ignore. (b) is simpler and matches existing patterns elsewhere
-(`mdns_init`).
+default event loop and creates the push task. **Option (a) is mandatory**:
+`esp_netif_init` and `esp_event_loop_create_default` MUST run in
+`app_main` *before* `ip_announcer_init`, not inside provisioning.
+
+Originally we considered option (b) — let provisioning own the loop and
+have ip_announcer detect `ESP_ERR_INVALID_STATE` and ignore. That is
+*wrong*: in IDF v6.0 (`components/esp_event/default_event_loop.c:20`)
+`esp_event_handler_register` returns `ESP_ERR_INVALID_STATE` when the
+default loop **does not exist**, not when it already exists. Picking
+(b) bites us silently — the cold-boot push handler is never registered,
+no IP_EVENT_STA_GOT_IP callback fires, and no ntfy notification is sent
+on cold boot. (Hot-boot via factory reset still works because by that
+point provisioning has long since created the loop.) See HANDOFF.md
+2026-04-29 for the post-mortem.
+
+`provisioning_run_and_connect()` therefore does NOT call
+`esp_event_loop_create_default()` itself — it assumes the loop already
+exists.
 
 ### NVS layout
 

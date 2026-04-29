@@ -5,6 +5,8 @@
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_err.h"
+#include "esp_event.h"
+#include "esp_netif.h"
 #include "nvs_flash.h"
 #include "driver/uart.h"
 #include "argtable3/argtable3.h"
@@ -683,6 +685,17 @@ void app_main(void)
     }
 
     ESP_ERROR_CHECK(ui_settings_init());
+
+    // Bring up esp_netif + the default event loop here (instead of inside
+    // provisioning) so any component that wants to register on IP_EVENT /
+    // WIFI_EVENT *before* the Wi-Fi driver starts can do so. ip_announcer
+    // depends on this — its IP_EVENT_STA_GOT_IP handler must exist before
+    // provisioning brings the link up, otherwise the cold-boot push is
+    // lost. esp_event_handler_register returns ESP_ERR_INVALID_STATE when
+    // the default loop hasn't been created yet, so failing to do this here
+    // silently drops every later registration call.
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
 
     // IP Announcer must init BEFORE net_dashboard so its IP_EVENT
     // handler is registered before provisioning fires the first

@@ -158,6 +158,15 @@ worker on a dedicated FreeRTOS task (priority 2, separate from
 control_task because HTTPS retries can hold the task ~15 s) drains
 the queue and updates the telemetry block atomically.
 
+**Boot-order constraint**: any component that registers on `IP_EVENT` /
+`WIFI_EVENT` (currently `ip_announcer`, `net_dashboard`'s `provisioning`)
+must run *after* `esp_event_loop_create_default()`. We do this once in
+`app_main` (right before `ip_announcer_init()`), not inside provisioning.
+`esp_event_handler_register` returns `ESP_ERR_INVALID_STATE` when the
+default loop doesn't exist — and that path is fatal in our code, so a
+mis-ordered init will abort instead of silently dropping the cold-boot
+push. See HANDOFF.md 2026-04-29 for the post-mortem.
+
 ### 2. Components never depend on `main`
 
 ESP-IDF's `main` component cannot be a `REQUIRES` dependency. Shared types
