@@ -1,581 +1,149 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+ESP32-S3 firmware for the Fan-TestKit bench (PWM gen, RPM cap, USB
+composite HID/CDC, Wi-Fi dashboard, multi-family PSU control). Detailed
+rules are split into [.claude/rules/](.claude/rules/) — load them on
+demand based on the task.
 
-## Hardware target
+## Critical rules (non-negotiable)
 
-**YD-ESP32-S3-COREBOARD V1.4** (ESP32-S3-WROOM-1, 16 MB flash, 8 MB octal
-PSRAM — the N16R8 variant). Schematic is in `docs/YD-ESP32-S3-SCH-V1.4.pdf`;
-consult it before allocating new GPIOs. The full design spec lives at
-`C:\Users\billw\.claude\plans\read-the-project-plan-pure-eagle.md`.
+- **Single handler, multiple transport frontends.** Setpoint control,
+  OTA, factory reset, PSU control all have one core handler with
+  WS/HID/CDC/CLI frontends that translate protocol only. Never
+  duplicate business logic in a frontend. Boot defaults go through the
+  same queue (`CTRL_CMD_SET_PWM` from `app_main`); don't seed atomics
+  from `pwm_gen_get()`. Dashboard `app.js` has no `lastSent` cache —
+  don't reintroduce one.
+- **Components never `REQUIRES main`.** Shared types live in
+  `components/app_api/include/app_api.h`.
+- **Boot order:** `esp_event_loop_create_default()` must run before any
+  component that registers on `IP_EVENT` / `WIFI_EVENT` (currently
+  `ip_announcer`, `net_dashboard` provisioning). Mis-ordered init
+  aborts on `ESP_ERR_INVALID_STATE`.
+- **Lock-free SPSC ring buffers** (`freq_fifo`, `rpm_fifo`) — don't
+  swap for `xQueue` without measuring; capture ISR runs at MHz rates.
+- **Atomic float `latest_rpm`** (bit-punned `uint32_t`, relaxed) —
+  don't add a mutex. RPM timeout sentinel is `period | 0x80000000`.
+- **PWM duty is NOT NVS-persisted.** Boot always starts at duty=0.
+  Hard safety invariant — a fan reboot under power must not restart
+  at the previous duty.
+- **PWM same-band updates use TEZ latching** (`update_cmp_on_tez`).
+  Don't `mcpwm_timer_stop`/restart in the update path — that's where
+  glitches come from.
+- **PWM band-cross requires shadow-register flush.** `reconfigure_for_band`
+  must software-sync timer to phase=0 right after `mcpwm_new_timer`.
+  See [.claude/rules/pwm-mcpwm.md](.claude/rules/pwm-mcpwm.md) for the
+  register sequence and three abandoned attempts that did NOT work.
+- **HID descriptor size invariant.** `_Static_assert(sizeof(...) == N)`
+  in `usb_descriptors.c` + `HID_REPORT_DESC_SIZE` macro in
+  `usb_composite.c:49` — both must move together when adding reports.
+- **PSU CRC has NO boot-time self-check.** Earlier `__attribute__((constructor))`
+  trapped before `app_main` on every cold boot. Don't reintroduce.
 
-Two USB-C ports with distinct roles:
+## Emergency quick-fix
 
-- **USB1** — CH343P USB-UART bridge on UART0. Serial console + `idf.py flash`
-  auto-reset. Always available for logs regardless of other config.
-- **USB2** — native USB D-/D+ on GPIO19/GPIO20. Routes to either the
-  USB-JTAG peripheral or TinyUSB via a `USB-JTAG` / `USB-OTG` 0 Ω jumper.
-  **TinyUSB composite (HID + CDC) requires the `USB-OTG` jumper to be
-  bridged.** Users often hit this on first run.
+- **Build picks up old config?** `del sdkconfig && idf.py fullclean &&
+  idf.py build`. `fullclean` keeps `sdkconfig`; `sdkconfig.defaults`
+  changes are silently ignored if the symbol already exists in
+  `sdkconfig`.
+- **Chip stuck in `waiting for download` after flash?** CH343 DTR/RTS
+  trap. Use `idf.py monitor --no-reset`, or a terminal that holds
+  DTR=1+RTS=1 on open (PuTTY works), or power-cycle USB. See
+  [.claude/rules/hardware-and-board.md](.claude/rules/hardware-and-board.md).
+- **`encrypted-flash` fails on a new board?** Don't run it. Secure Boot
+  and Flash Enc are currently `n` in `sdkconfig.defaults` (temp
+  workaround); use plain `idf.py flash`.
+- **TinyUSB doesn't enumerate?** Check the USB-OTG / USB-JTAG 0Ω jumper
+  on the board — composite HID+CDC needs `USB-OTG`.
+- **Build error `driver/uart.h: no such file`?** v6.0 split the
+  `driver` umbrella. Add `esp_driver_uart` (or peripheral-specific
+  REQUIRES) to the component's CMakeLists.
 
-Pins reserved by hardware: **19, 20** (USB). Strapping pins to avoid for
-critical outputs: 0 (BOOT), 3 (USB-JTAG select), 45, 46. Onboard WS2812
-RGB LED is on GPIO48.
+## Key file locations
 
-UART1 (PSU bus) defaults to GPIO 38 (TX) / 39 (RX); 8N1; baud is
-family-dependent (Riden 115200, XY-SK120 115200, WZ5005 19200) and
-Kconfig-overridable. See `docs/Power_Supply_Module.md` for wiring.
+- `components/app_api/include/app_api.h` — shared types
+  (`ctrl_cmd_t`, queue handles); cross-component API headers.
+- `components/usb_composite/include/usb_protocol.h` — HID report IDs
+  and CDC SLIP frame ops (host-tool contract; payload changes are
+  breaking).
+- `components/net_dashboard/ws_handler.c` — WebSocket JSON contract
+  inline.
+- `components/net_dashboard/include/net_dashboard.h` —
+  `net_dashboard_factory_reset()` (4-transport convergence point).
+- `components/pwm_gen/pwm_gen.c` — 2-band table + `reconfigure_for_band`.
+- `components/rpm_cap/rpm_cap.c` — capture ISR + timeout sentinel.
+- `components/psu_driver/` — multi-family vtable (`riden`, `xy_sk120`,
+  `wz5005`).
+- `main/idf_component.yml` — pinned component-manager deps.
+- `sdkconfig.defaults` — pinned Kconfig (target, partition table,
+  Secure Boot off).
+- `docs/YD-ESP32-S3-SCH-V1.4.pdf` — board schematic; consult before
+  allocating GPIOs.
+- `HANDOFF.md` — IDF v5.5.1 → v6.0 migration notes + Secure Boot
+  re-enable bisect plan.
 
-## Build & flash workflow (Windows)
+## Hardware quick-ref
 
-ESP-IDF v6.0 lives at `C:\esp\v6.0\esp-idf`. (We migrated up from v5.5.1
-in 2026-04 — see `HANDOFF.md` for the migration notes.) Activate with
-either:
+**Board:** YD-ESP32-S3-COREBOARD V1.4 (ESP32-S3-WROOM-1, N16R8: 16 MB
+flash, 8 MB octal PSRAM). Two USB-C: **USB1** = CH343P UART0 console
+(always on); **USB2** = native USB on GPIO19/20, needs **USB-OTG**
+jumper for TinyUSB composite.
 
-- Desktop shortcut **"ESP-IDF 6.0 PWM Project"** — opens a new PowerShell
-  with env active and cwd already at this project. Easiest for daily work.
-- `esp6 pwm` PowerShell alias — activates v6.0 in the current PowerShell
-  window AND cd's to this project. Defined in
-  `D:\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`.
-- `C:\esp\v6.0\esp-idf\export.ps1` (PowerShell) or `export.bat` (cmd) —
-  raw activation; no auto-cd. `export.sh` only works in Git Bash/MSYS2.
+**GPIO reservations:** 19, 20 (USB). Strapping pins to avoid for
+critical outputs: 0 (BOOT), 3 (USB-JTAG select), 45, 46. WS2812 RGB on
+GPIO48. PSU UART1: GPIO38 (TX) / GPIO39 (RX), 8N1, baud per family.
+
+Full details + CH343 trap → [.claude/rules/hardware-and-board.md](.claude/rules/hardware-and-board.md).
+
+## Build & flash (Windows)
+
+ESP-IDF v6.0 at `C:\esp\v6.0\esp-idf`. Activate via desktop shortcut
+**"ESP-IDF 6.0 PWM Project"**, the `esp6 pwm` PowerShell alias, or
+`C:\esp\v6.0\esp-idf\export.ps1`.
 
 ```bash
-idf.py set-target esp32s3     # once (already done; sdkconfig.defaults pins it)
 idf.py build
-idf.py -p COM24 flash monitor # plain-text flash (current dev build has no Secure Boot)
+idf.py -p COM24 flash monitor
 ```
 
-The previous v5.5.1 install at `C:\Espressif\frameworks\esp-idf-v5.5.1`
-is still on disk; don't `export` it inside a v6.0 shell — Python venv
-collisions. v5.5.1 is reachable via the original installer Start-menu
-shortcut **"ESP-IDF 5.5.1 CMD"** if you ever need to fall back.
-
-現階段 `sdkconfig.defaults` 把 `CONFIG_SECURE_BOOT` 跟
-`CONFIG_SECURE_FLASH_ENC_ENABLED` 都關掉 (temporary workaround)，所以
-**不要** 跑 `encrypted-flash` — 那是 eFuse 已經燒過 flash-enc key 之後
-的 re-flash 指令，在全新板子上會直接失敗。Secure Boot 重開的路徑
-待做，詳見 `HANDOFF.md`。
-
-### sdkconfig trap (hit repeatedly in this project)
-
-`idf.py fullclean` wipes `build/` but **keeps `sdkconfig`**. Any change to
-`sdkconfig.defaults` for a symbol already present in `sdkconfig` is silently
-ignored. When modifying partition layout, Secure Boot, Flash Encryption, or
-TinyUSB Kconfig:
-
-```
-del sdkconfig
-idf.py fullclean
-idf.py build
-```
-
-### Kconfig choice groups must be fully stated
-
-For `choice` groups like `CONFIG_PARTITION_TABLE_TYPE`, setting only the
-winning member (`CUSTOM=y`) isn't enough if `sdkconfig` has a stale `=y`
-on a sibling (`TWO_OTA=y`). The sdkconfig merge picks "last wins" and
-silently uses the built-in default partition table. `sdkconfig.defaults`
-explicitly sets all siblings to `=n`; preserve this pattern for any other
-choice group you touch.
-
-### CH343 DTR/RTS auto-program trap — chip gets stuck in download mode
-
-Symptom: after a successful flash, the serial monitor shows
-`rst:0x1 (POWERON),boot:0x0 (DOWNLOAD(USB/UART0)) waiting for download`
-on every reset instead of running the app. BOOT button is not pressed,
-flash hashes verify, but the app never runs.
-
-Root cause: the YD-ESP32-S3 has an "Auto program" transistor circuit on
-the CH343's DTR/RTS lines (schematic `docs/YD-ESP32-S3-SCH-V1.4.pdf`,
-page 1, Q1/Q2). The truth table:
-
-```
-DTR  RTS  -->  EN   IO0
- 1    1         1    1     <- run mode (idle)
- 1    0         0    1     <- reset asserted
- 0    1         1    0     <- download mode (GPIO0 low at boot)
-```
-
-Some CH343 driver + pySerial combinations leave RTS asserted (RTS=1
-while DTR drops to 0 at port close), which pulls GPIO0 low so the chip
-boots into download mode on the next reset. `idf.py monitor` re-triggers
-this every time it opens the port, so the chip never escapes.
-
-**Fix** — when opening a serial tool to interact with the REPL:
-
-- Use a terminal that lets you **explicitly hold DTR=1 and RTS=1** on
-  port open (串口調試助手 / SerialTool works — check both DTR and RTS
-  boxes before 打開). PuTTY by default does not toggle these and works.
-- Or: `idf.py -p COMn monitor --no-reset` skips the reset-on-open
-  sequence.
-- Or: physical power cycle (unplug USB, wait 2 s, replug) — boots
-  cleanly because no host has the port open yet.
-
-Do **not** try to solve this by removing R5/R7/Q1/Q2 — esptool's auto
-program sequence on flash depends on them. Only monitor-open is the
-problem.
-
-## Architecture — two invariants that must hold
-
-### 1. Single logical handler, multiple transport frontends
-
-Both **setpoint control** and **firmware update** have exactly one
-implementation with two transport frontends:
-
-```
-Wi-Fi WebSocket ──┐                             ┌── /ota POST ──┐
-                  ├──► control_task (setpoints) │                ├──► ota_writer_task
-USB HID reports ──┘                             └── CDC frames ──┘     (esp_ota_*)
-```
-
-Frontends translate protocol only. Core logic is written once. A third
-transport (e.g. Ethernet) should plug in as a new frontend feeding the same
-`ctrl_cmd_queue` / `ota_core_*` APIs — never duplicate the business logic.
-
-**Boot defaults go through the queue too.** `app_main` posts
-`CTRL_CMD_SET_PWM(10000, 0)` after `control_task_start()` so the boot
-default takes the same `pwm_gen_set → publish_pwm` path every later
-command uses. Hardware, the published atomics in control_task, and
-downstream consumers (telemetry @ 20 Hz, HID status frames) all reflect
-the same value from boot. Don't seed the atomics directly from
-`pwm_gen_get()` — that bypasses the single path and lets the hardware
-drift from the published state. Symptom if violated: the dashboard's
-first telemetry frame carries `freq=0`, the JS picks it up, and a
-duty-only commit before any freq change ships `{freq:0, duty:X}` →
-`pwm_gen_set` rejects with `ESP_ERR_INVALID_ARG`.
-
-**Dashboard mirrors the same invariant.** `app.js` has no `lastSent`
-cache for freq/duty — each panel's `onCommit` reads the *other* axis from
-that panel's `getValue()` at commit time, and `setFromDevice` keeps
-`panel.current` locked to telemetry. Don't reintroduce a parallel cache
-("just to avoid one extra read") — it WILL desync.
-
-The same posture extends to **IP announcement**: ntfy.sh push is
-fire-and-forget after every IP_EVENT_STA_GOT_IP, going through
-`ip_announcer_priv_enqueue_push` from the event handler. The push
-worker on a dedicated FreeRTOS task (priority 2, separate from
-control_task because HTTPS retries can hold the task ~15 s) drains
-the queue and updates the telemetry block atomically.
-
-**Boot-order constraint**: any component that registers on `IP_EVENT` /
-`WIFI_EVENT` (currently `ip_announcer`, `net_dashboard`'s `provisioning`)
-must run *after* `esp_event_loop_create_default()`. We do this once in
-`app_main` (right before `ip_announcer_init()`), not inside provisioning.
-`esp_event_handler_register` returns `ESP_ERR_INVALID_STATE` when the
-default loop doesn't exist — and that path is fatal in our code, so a
-mis-ordered init will abort instead of silently dropping the cold-boot
-push. See HANDOFF.md 2026-04-29 for the post-mortem.
-
-### 2. Components never depend on `main`
-
-ESP-IDF's `main` component cannot be a `REQUIRES` dependency. Shared types
-like `ctrl_cmd_t` live in `components/app_api/include/app_api.h`. When
-adding a new cross-component API, put the header in `app_api/` (or a new
-dedicated component) — don't let any component `REQUIRES main`.
+Don't `export` the v5.5.1 install inside a v6.0 shell (Python venv
+collision). Full toolchain notes, sdkconfig trap, security posture,
+v6.0 driver split, component-manager pins →
+[.claude/rules/build-and-toolchain.md](.claude/rules/build-and-toolchain.md).
 
 ## Task topology (FreeRTOS)
 
-```
-priority 6  control_task                 owns PWM setpoints, drains ctrl_cmd_queue
-priority 5  rpm_converter_task           freq_fifo → period→RPM → rpm_fifo
-priority 4  rpm_averager_task            sliding avg → atomic latest_rpm + history
-priority 3  httpd (ESP-IDF)              HTTP + WebSocket
-priority 3  usb_hid_task                 HID OUT parse; IN @ 50 Hz from latest_rpm
-priority 2  usb_cdc_tx/rx                CDC log mirror + SLIP OTA frames
-priority 2  telemetry_task               20 Hz WebSocket status push
-priority 2  ota_writer_task              single esp_ota_* writer (mutex-guarded)
-```
-
-Invariants:
-
-- **Lock-free SPSC ring buffers** (`freq_fifo`, `rpm_fifo`) connect ISR→task
-  and task→task. Don't replace with `xQueue` without measuring — the capture
-  ISR runs at up to MHz rates.
-- `latest_rpm` is an **atomic float bit-punned through `uint32_t`**, relaxed
-  ordering. One-sample staleness is acceptable; don't add a mutex.
-- **RPM timeout sentinel**: when no edge arrives within `rpm_timeout_us`,
-  the timeout callback pushes a period value with `0x80000000` OR'd in.
-  The converter task recognises this sentinel bit and emits `0.0 RPM`.
-  Default timeout is 1 second. Preserve this mechanism when editing
-  `rpm_cap.c`.
-
-## PWM glitch-free update mechanism
-
-`pwm_gen_set()` writes new period and compare values; both latch on
-`MCPWM_TIMER_EVENT_EMPTY` (TEZ — timer equals zero) via the
-`update_cmp_on_tez` flag on the comparator. **Do not** call
-`mcpwm_timer_stop` / restart in the update path for same-band changes —
-that's where glitches come from.
-
-Frequency range is **10 Hz ~ 1 MHz**. The 16-bit MCPWM counter
-(`MCPWM_LL_MAX_COUNT_VALUE = 0x10000`) cannot span that range with a
-single fixed `resolution_hz`, so `pwm_gen.c` defines a 2-band table and
-picks a band per call:
-
-| Band | resolution_hz | freq range       | period_ticks   | duty bits |
-|------|---------------|------------------|----------------|-----------|
-| HI   | 10 MHz        | 153 Hz – 1 MHz   | 10 – 65359     | 3.3 – 16  |
-| LO   | 625 kHz       | 10 Hz – 152 Hz   | 4112 – 62500   | 12 – 16   |
-
-**Critical constraint — MCPWM group prescaler is committed on first use
-and cannot be changed.** Once `mcpwm_new_timer()` runs the first time,
-`group->prescale` is locked. Every subsequent timer in the same group
-must share that group_prescale; only the per-timer `timer_prescale`
-(range [1..256]) can vary. That gives a max 256× spread of resolutions
-within one group.
-
-**ESP-IDF v6.0 changed `MCPWM_GROUP_CLOCK_DEFAULT_PRESCALE` from 2 to
-1** (see `esp_driver_mcpwm/src/mcpwm_private.h:55`). Group clock is now
-160 MHz (was 80 MHz). At gp=1 the resolution range is 160 MHz down to
-160 MHz / 256 = 625 kHz. HI=10 MHz uses timer_prescale=16; LO=625 kHz
-uses timer_prescale=256. Both fit within gp=1's range, so cross-band
-swaps don't trigger `"group prescale conflict"` errors.
-
-The driver does not expose a public knob to force a different
-group_prescale (`mcpwm_timer_config_t` has no such field), and the
-auto-resolver in `mcpwm_set_prescale` greedily picks the smallest
-group_prescale that satisfies the first call. That locks us at gp=1
-forever once HI band's first `new_timer` runs.
-
-1 Hz – 9 Hz cannot be reached at gp=1 + 16-bit counter. Extending
-below 10 Hz requires switching the generator to LEDC (separate
-peripheral with fractional dividers) or sharing group 1 with a second
-operator/generator chain (but only one generator can drive the same
-GPIO at a time, so cross-band swaps would need full generator
-delete+recreate — slower than the current TEZ-based reconfigure). Both
-are bigger refactors.
-
-### v6.0 band-cross shadow-register flush
-
-ESP32-S3 MCPWM `timer_period` and `timer_prescale` live in shadow
-registers, with `timer_period_upmethod` selecting when shadow→active
-copies. v6.0 `mcpwm_new_timer` sets `upmethod=0` ("immediate"), but
-the active flush is **not** actually atomic with the shadow write.
-Direct evidence (via `timer_status.timer_value` readback right after
-`mcpwm_new_timer` returns): on a band cross, the counter is sometimes
-still at the OLD peak (e.g. ~25000) while the shadow has the NEW peak
-(e.g. 2000), and counter increment-rate measurement shows the active
-prescale is also stale. The on-pin symptom is `old_resolution /
-new_shadow_peak`, e.g. a 1 kHz request outputs 62.5 Hz
-(= 625 kHz / 10000) or a 100 Hz request outputs 1.6 kHz
-(= 10 MHz / 6250).
-
-Fix in `reconfigure_for_band`: software-sync the timer to phase=0
-right after `mcpwm_new_timer` returns. The reload-to-zero is itself a
-TEZ event, which forces shadow→active flush for both prescale and
-period atomically:
-
-```c
-MCPWM0.timer[0].timer_sync.timer_phase = 0;
-MCPWM0.timer[0].timer_sync.timer_phase_direction = 0;
-MCPWM0.timer[0].timer_sync.timer_synci_en = 1;
-MCPWM0.timer[0].timer_sync.timer_sync_sw =
-    ~MCPWM0.timer[0].timer_sync.timer_sync_sw;   // auto-clear toggle
-MCPWM0.timer[0].timer_sync.timer_synci_en = 0;
-```
-
-Uses private register access (`hal/mcpwm_ll.h` + `soc/mcpwm_struct.h`
-in `pwm_gen` component's `PRIV_REQUIRES`). Keep this — verified on
-scope across hundreds of LO↔HI crosses under Wi-Fi load with no
-miscounts. Earlier "fix" attempts that did NOT work (do not
-reintroduce):
-
-- Forcing `LOG_MAXIMUM_LEVEL_DEBUG=y` + runtime
-  `esp_log_level_set("mcpwm", DEBUG)` — narrowed the race via
-  LOGD-formatting delay, never closed it under load.
-- `STOP_EMPTY → esp_rom_delay_us(N) → START_NO_STOP` "double-tap"
-  after `mcpwm_timer_enable` — orthogonal to the shadow-flush issue.
-- Halting the OLD counter via `mcpwm_ll_timer_set_count_mode(PAUSE)`
-  before `mcpwm_del_timer` — stale-active-register survives
-  teardown, so this changes nothing.
-
-**Same-band updates** (e.g. 500 Hz → 600 Hz) stay glitch-free via TEZ.
-**Band-crossing updates** (152 Hz ↔ 153 Hz) go through
-`reconfigure_for_band()`: stop → disable → delete timer → `mcpwm_new_timer`
-with the new `resolution_hz` → reconnect operator → re-arm comparator →
-enable → start. This produces a brief (~tens of µs) output discontinuity.
-Operator, comparator, and generator objects are retained across the
-reconfigure so their action config (high on TEZ, low on compare) does
-not need to be re-registered.
-
-The actual bit count at any freq is exposed via
-`pwm_gen_duty_resolution_bits()` for the UI.
-
-The "change-trigger output" on a separate GPIO is a software pulse from
-`control_task` after the write succeeds — not a hardware sync output.
-Pulse width is clamped to [200 µs, 1000 µs] so it's always cleanly
-observable regardless of PWM freq. If jitter on that trigger matters,
-wire it to an MCPWM ETM event instead.
-
-## Security posture — 目前 disabled
-
-`sdkconfig.defaults` 現階段把 `CONFIG_SECURE_BOOT` 跟
-`CONFIG_SECURE_FLASH_ENC_ENABLED` 都設 `n` (temporary workaround)，因為
-全新 eFuse 板子第一次 boot 這兩個 feature 都開時會 boot loop (`Saved PC`
-指 `process_segment @ esp_image_format.c:622`)，root cause 待定位。
-
-要加回 security 的順序：先單獨啟用 Secure Boot V2（不開 Flash Enc）確認
-能 boot；再單獨啟用 Flash Enc（不開 SB）；兩者都能單獨 work 再 combined。
-這個 bisect 還沒做，詳情見 `HANDOFF.md` 的 Bug 1 段。
-
-Release-mode 的 irreversible eFuse checklist 仍在 `docs/release-hardening.md`；
-Step 0 要改寫成「先確認 non-secure build 全功能驗證過，再單 feature
-啟用 security」— 現在的 Step 0 不對。
-
-`secure_boot_signing_key.pem` 已 gitignored；每個 dev 自己用
-`espsecure.py generate_signing_key --version 2` 產。
-
-## Component manager dependencies
-
-`main/idf_component.yml` 上目前 pin 三個 component：
-
-- **`espressif/esp_tinyusb ~1.7.0`** — composite HID + CDC descriptor。
-  v6.0 IDF 跟 1.7.x 仍相容（驗證過 build + 枚舉 OK）。
-- **`espressif/cjson ^1.7.19`** — v6.0 把 IDF built-in `json` component
-  拔掉，cJSON 改 component manager 上 `espressif/cjson`（直接 depend，
-  不是 transitive）。`net_dashboard/CMakeLists.txt` 的 REQUIRES 寫
-  `espressif__cjson`。
-- **`espressif/mdns ^1.8.0`** — mDNS hostname `fan-testkit.local` 廣告
-  用。v6.0 把 built-in `mdns` component 拔掉搬到 component manager，
-  所以 `net_dashboard/CMakeLists.txt` 的 REQUIRES 要用 namespaced name
-  `espressif__mdns`（不是 v5.x 的 `mdns`）。
-
-Wi-Fi provisioning 現在走 SoftAP + captive portal，不再依賴 BLE 或
-任何外部 provisioning component — 板子第一次 boot 沒有 creds 時會開
-`Fan-TestKit-setup` 這個 open AP，phone 接上後 Android captive-portal
-detector 會自動跳 browser。成功後 success page 同時秀 `fan-testkit.local`
-跟 raw IP。細節見 `components/net_dashboard/provisioning.c` 跟 spec
-`docs/superpowers/specs/2026-04-22-softap-captive-portal-design.md`。
-
-### esp_tinyusb 1.7.x 的 HID 限制
-
-1.7.x 的 default config descriptor **不處理 HID**（只 cover
-CDC/MSC/NCM/VENDOR）。開 `CFG_TUD_HID > 0` 就必須提供自製
-`configuration_descriptor`，否則 `tinyusb_set_descriptors` 會 reject。
-`usb_composite.c` 的 `s_configuration_descriptor[]` 就是這個 —— IF0 HID,
-IF1+IF2 CDC (via IAD)，EP 0x81 HID IN, 0x82 CDC notif IN, 0x03 CDC OUT,
-0x83 CDC IN。
-
-TinyUSB 的 `TUD_HID_DESCRIPTOR()` 要 compile-time report desc length，
-所以 `HID_REPORT_DESC_SIZE` 寫死 `53` 並在 `usb_descriptors.c` 用
-`_Static_assert(sizeof(usb_hid_report_descriptor) == 53)` 綁住，改 report
-descriptor 時 compile error 會立刻提醒你同步更新。
-
-升級到 esp_tinyusb 2.x 時 `tinyusb_config_t` 改用
-`full_speed_config / high_speed_config`，上述 descriptor bytes 格式不變，
-但 struct field name 要跟著改。
-
-### v6.0 driver split (主要 component REQUIRES 變動)
-
-v5.x 的 `driver` 變成多 per-peripheral components。如果某個 component
-include `driver/uart.h` / `driver/gpio.h` / `driver/i2c.h` 之類 header
-卻 build error 「no such file」，是 v6.0 抽掉 `driver` umbrella 對應
-header 的 transitive include。在 component CMakeLists 加：
-
-| header               | REQUIRES                |
-|----------------------|-------------------------|
-| `driver/uart.h`      | `esp_driver_uart`       |
-| `driver/gpio.h`      | `esp_driver_gpio`       |
-| `driver/i2c.h`       | `esp_driver_i2c`        |
-| `driver/mcpwm_*.h`   | `esp_driver_mcpwm`      |
-| `freertos/ringbuf.h` | `esp_ringbuf`           |
-
-`driver` umbrella 仍存在但只有 i2c/touch_sensor/twai 還掛在底下，其他
-都搬走了。
-
-## Wire protocols (host tool contracts)
-
-- **HID report IDs** and **CDC SLIP frame ops** are defined in
-  `components/usb_composite/include/usb_protocol.h`. These are the contract
-  with the PC host tool (separate project, out of this repo's scope).
-  Changing payload shapes is a breaking change.
-- **WebSocket JSON** contract: `{type: "set_pwm" | "set_rpm" |
-  "factory_reset"}` for client→device, `{type: "status" | "ack" |
-  "ota_progress"}` for device→client. Documented inline in
-  `components/net_dashboard/ws_handler.c`.
-
-## Factory reset / reprovision (4 transports, 1 core)
-
-Instance of the "single handler, multiple frontends" invariant. Every
-reset entry point lands on `net_dashboard_factory_reset()`
-(`components/net_dashboard/include/net_dashboard.h`), which wipes
-stored Wi-Fi credentials via `prov_clear_credentials()` (calls
-`esp_wifi_restore()`) and calls `esp_restart()`. Next boot the device
-sees no credentials → SoftAP `Fan-TestKit-setup` opens for captive-portal
-provisioning.
-
-```
-Web UI confirm      ──┐
-USB HID 0x03 + 0xA5 ──┤
-USB CDC 0x20 + 0xA5 ──┼──► net_dashboard_factory_reset()
-BOOT long-press ≥3s ──┘       ├── prov_clear_credentials()
-                              └── esp_restart()
-```
-
-Design notes:
-
-- **Magic-byte guard on USB paths** (`USB_HID_FACTORY_RESET_MAGIC =
-  0xA5`, `USB_CDC_FACTORY_RESET_MAGIC = 0xA5`) so a stray zeroed
-  report can't wipe credentials. Web UI uses a JS `confirm()` dialog;
-  BOOT uses a 3-second hold (50 ms poll cadence in
-  `boot_button_task`, GPIO0 with internal pull-up).
-- **200 ms restart delay** in `factory_reset_task` lets each
-  transport's ack frame (WS `{type:"ack",op:"factory_reset"}`, CDC op
-  `0x21`, HID report `0x03` silent) flush before the reset interrupts
-  the connection.
-- **Idempotent** — second call inside the 200 ms window is a no-op
-  via a static volatile flag. BOOT long-press triggers spawn exactly
-  one reset even if the input glitches.
-- **GPIO0 runtime reuse**: GPIO0 is a strapping pin but only sampled
-  at reset for BOOT/DOWNLOAD selection. After boot it's a normal
-  input that any app can read.
-- **Cross-component coupling**: `usb_composite` REQUIRES
-  `net_dashboard` so HID/CDC callbacks can reach the reset API.
-  Direction is acceptable — `net_dashboard` is the "network state"
-  component and factory reset *is* a network-state concern
-  (credentials).
-- **HID descriptor size**: each new report id grows
-  `usb_hid_report_descriptor` (53 → 63 with `0x03`, → 73 with GPIO `0x04`,
-  → 83 with PSU `0x05`). The `_Static_assert(sizeof(...) == 83)` in
-  `usb_composite/usb_descriptors.c` and the `HID_REPORT_DESC_SIZE` macro
-  in `usb_composite.c:49` keep the two in sync — any future descriptor
-  edit triggers a compile error on mismatch.
-
-## PSU driver — multi-family (5th controllable subsystem)
-
-`components/psu_driver/` owns UART1 and dispatches to one of three PSU
-backends at boot, picked by the NVS key `psu_driver/family` (default
-from Kconfig `APP_PSU_DEFAULT_FAMILY_*`):
-
-- **`riden`** — Riden RD60xx (Modbus-RTU, factory baud 115200, register
-  map in `psu_riden.c`).
-- **`xy_sk120`** — XY-SK120 (Modbus-RTU, factory baud 115200, register
-  map in `psu_xy_sk120.c`).
-- **`wz5005`** — WZ5005 (custom 20-byte sum-checksum protocol, factory
-  baud 19200, op codes in `psu_wz5005.c`).
-
-`APP_PSU_UART_BAUD` defaults track the family's factory baud; bench
-operators with re-keyed panels override per-build via
-`idf.py menuconfig` → "PSU driver". The two Modbus-RTU backends share
-`psu_modbus_rtu.c` (CRC-16, FC 0x03/0x06 helpers); WZ5005 is fully
-standalone. One UART mutex shared by all backends.
-
-Switching family at runtime: dashboard PSU panel → Family dropdown →
-Save → Reboot button (or `psu_family <name>` CLI + manual reboot).
-The change is NVS-persisted but boot-effective (re-init UART for new
-baud is risky vs simple reboot).
-
-Same single-handler invariant as PWM, RPM, GPIO, and the relay power
-switch:
-
 ```text
-Wi-Fi WS  set_psu_voltage / current / output / slave  ──┐
-USB HID 0x05 + ops 0x10..0x13                            ├──► control_task ──► psu_driver_set_*()
-USB CDC ops 0x40..0x43                                   │                          │
-CLI psu_v / psu_i / psu_out / psu_slave / psu_family     ──┘                          ▼
-                                                                          backend vtable
-                                                                          (riden / xy_sk120 / wz5005)
+priority 6  control_task         owns PWM setpoints, drains ctrl_cmd_queue
+priority 5  rpm_converter_task   freq_fifo → period→RPM → rpm_fifo
+priority 4  rpm_averager_task    sliding avg → atomic latest_rpm + history
+priority 3  httpd                HTTP + WebSocket
+priority 3  usb_hid_task         HID OUT parse; IN @ 50 Hz from latest_rpm
+priority 2  usb_cdc_tx/rx        CDC log mirror + SLIP OTA frames
+priority 2  telemetry_task       20 Hz WebSocket status push
+priority 2  ota_writer_task      single esp_ota_* writer (mutex-guarded)
+priority 4  psu_task             5 Hz UART poll, atomic V/I publish
+priority 2  ip_announcer worker  fire-and-forget ntfy.sh push (HTTPS, may stall ~15 s)
 ```
 
-Telemetry (V_SET / I_SET / V_OUT / I_OUT / output) polled at 5 Hz,
-published as atomic bit-punned floats. Surfaces in the 20 Hz WS status
-frame as a `psu` block, in CDC op `0x44` at 5 Hz, and via `psu_status`
-CLI.
+Architectural rationale + full invariants →
+[.claude/rules/architecture-deep.md](.claude/rules/architecture-deep.md).
 
-Slave address + family are NVS-persisted in namespace `psu_driver`,
-keys `slave_addr` and `family`. Setting either does **not** issue a
-write to the supply — the supply's own slave address (and panel-keyed
-baud, per family) is set from the front panel; firmware just matches
-it. Slave range is 1..255 (Modbus families clamp to 1..247 inside the
-backend; WZ5005 uses the full 1..255).
+## Reference docs
 
-Hand-rolled (not `esp-modbus`) because we use 2 function codes (0x03 read
-holding, 0x06 write single) for the Modbus families, and a wholly
-different 20-byte custom frame for WZ5005. Adding another component-
-manager pin alongside `esp_tinyusb` / `mdns` / `cjson` would exceed the
-LoC saved. Riden register map in `psu_riden.c`; XY-SK120 register map
-in `psu_xy_sk120.c`; WZ5005 op-code table in `psu_wz5005.c`.
+| Topic | File |
+| --- | --- |
+| Hardware, USB jumpers, CH343 trap | [.claude/rules/hardware-and-board.md](.claude/rules/hardware-and-board.md) |
+| ESP-IDF v6.0, sdkconfig, security, deps | [.claude/rules/build-and-toolchain.md](.claude/rules/build-and-toolchain.md) |
+| Single-handler invariant, task rationale | [.claude/rules/architecture-deep.md](.claude/rules/architecture-deep.md) |
+| PWM 2-band, MCPWM v6.0 quirks, shadow flush | [.claude/rules/pwm-mcpwm.md](.claude/rules/pwm-mcpwm.md) |
+| Factory reset, PSU multi-family, NVS keys | [.claude/rules/subsystems.md](.claude/rules/subsystems.md) |
+| PSU wiring + register maps | [docs/Power_Supply_Module.md](docs/Power_Supply_Module.md) |
+| Captive-portal provisioning design | [docs/superpowers/specs/2026-04-22-softap-captive-portal-design.md](docs/superpowers/specs/2026-04-22-softap-captive-portal-design.md) |
+| Release-mode eFuse hardening | [docs/release-hardening.md](docs/release-hardening.md) |
+| Migration notes (v5.5.1 → v6.0) | [HANDOFF.md](HANDOFF.md) |
 
-CRC-16 uses poly `0xA001`, init `0xFFFF`, shift-right-after-XOR. There is
-deliberately **no boot-time self-check**: an earlier
-`__attribute__((constructor))` compared against `0x0944` and trapped on
-mismatch, but that constant was wrong — every cold boot trapped before
-`app_main` ran, putting the chip in a reset loop. CRC correctness is
-verified end-to-end instead: a bad implementation produces frames the
-supply rejects, every transaction times out, and `link_ok` stays false →
-the dashboard immediately shows "PSU offline". Don't reintroduce the
-boot-time check unless you have a verified canonical CRC vector AND log
-output before the trap (constructors run before `ESP_LOG` is up, so a
-silent trap is the only failure mode — debug-hostile by construction).
-
-The same posture applies to WZ5005's sum-mod-256 checksum.
-
-UART access is funnelled through a single mutex (`s_uart_mutex` in
-`psu_driver.c`, exposed to backends via `psu_driver_priv_get_uart_mutex`)
-so setpoint writes from `control_task` (priority 6) and the polling
-loop on `psu_task` (priority 4) cannot interleave bytes on the wire.
-Inter-frame gap is 2 ms for Modbus families (3.5-char @ 19200 ≈ 1.8 ms);
-WZ5005 uses 3 ms.
-
-Link health: 5 consecutive timeouts/CRC failures flips `link_ok` to
-false; first success flips it back. Only state transitions log — avoids
-spam when the cable is unplugged.
-
-## NVS-persisted runtime tunables
-
-Three additional namespaces beyond the existing `psu_driver` namespace
-hold user-tunable state that should survive reboot:
-
-- `rpm_cap`: keys `pole` (u8), `mavg` (u16), `timeout_us` (u32) — set
-  via `rpm_cap_save_params_to_nvs()` / `rpm_cap_save_timeout_to_nvs()`.
-- `pwm_gen`: key `freq_hz` (u32) — set via
-  `pwm_gen_save_current_freq_to_nvs()`. **Duty is deliberately NOT
-  persisted** — boot always starts at duty=0 regardless of saved
-  state. This is a hard safety invariant: a fan reboot under power
-  must not silently restart at the previous duty.
-- `ui_settings`: keys `duty_step` (blob: float, 4 B), `freq_step` (u16)
-  — set via `ui_settings_save_steps()`. Owned by the
-  `components/ui_settings/` component, which is also referenced by
-  `net_dashboard` so the WS status frame can serve current step values
-  to all browser clients (no per-browser localStorage; the device is
-  the source of truth).
-- `ip_announcer`: keys `enable` (u8), `topic` (str), `server` (str),
-  `priority` (u8), `last_ip` (str). Owned by the
-  `components/ip_announcer/` component, which is also referenced by
-  `net_dashboard` (status frame) and `captive_portal` (deeplink on
-  /success). Topic is resolved at first boot from NVS → Kconfig
-  `APP_IP_ANNOUNCER_TOPIC_DEFAULT` → random fallback, then persisted
-  back to NVS so subsequent boots skip the resolution. Placeholder
-  guard: topics matching `CHANGE-ME-*` / `fan-testkit-CHANGE*` or
-  shorter than 16 chars are refused at push-enqueue time, with a
-  red banner in the dashboard.
-
-All Save commands flow through `control_task` (CTRL_CMD_SAVE_RPM_PARAMS /
-SAVE_RPM_TIMEOUT / SAVE_PWM_FREQ / SAVE_UI_STEPS) and are reachable via
-all four transports:
-
-- WebSocket: `{"type":"save_rpm_params"}`, `{"type":"save_rpm_timeout"}`,
-  `{"type":"save_pwm_freq"}`, `{"type":"save_ui_steps","duty_step":...,
-  "freq_step":...}`
-- HID: report id `0x06` (USB_HID_REPORT_SETTINGS_SAVE) with op codes
-  `0x01..0x04` covering all four settings in a single 8-byte payload.
-  Adding this report grew the HID descriptor from 83 → 93 bytes; the
-  `_Static_assert(sizeof(usb_hid_report_descriptor) == 93)` and
-  `HID_REPORT_DESC_SIZE` macro must stay in lockstep.
-- CDC SLIP: ops `0x50..0x53`. `save_pwm_freq`'s u32 payload is
-  advisory; the device authoritatively saves its live freq via
-  `pwm_gen_get` to avoid transport-level race conditions.
-- CLI: `save_rpm_params`, `save_rpm_timeout`, `save_pwm_freq`,
-  `save_ui_steps <duty> <freq>`.
-
-NVS save error handling policy: every save fn propagates both
-`nvs_set_*` and `nvs_commit` errors via the
-`(es == ESP_OK) ? nvs_commit(h) : ESP_OK` short-circuit. Pre-existing
-`psu_driver` retains the older silent-commit pattern for now;
-acknowledged tech debt.
-
-## Interaction & communication preferences
+## Communication preferences
 
 All responses and commit-message bodies: **晶晶體** (Traditional Chinese +
 English code-switching). Code, command names, and technical keywords stay
