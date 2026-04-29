@@ -2,17 +2,17 @@ menu "IP Announcer (ntfy)"
 
 config APP_IP_ANNOUNCER_TOPIC_DEFAULT
     string "Default ntfy topic (empty = auto-generate random)"
-    default ""
+    default "fan-testkit-gmt-bench"
     help
         Topic name pushed to ntfy.sh on every IP_EVENT_STA_GOT_IP.
         WARNING: this is your channel's de-facto password — anyone
         who reads this string from your repo can subscribe and see
-        every IP this device pushes. Either:
+        every IP this device pushes. Default is the GMT bench topic,
+        used by all boards built from this repo. Override options:
           - Leave empty: each board generates a private random topic
             on first boot. Recommended for shared / public builds.
           - Set in sdkconfig.defaults.local (gitignored): all boards
-            from your private build share one topic. Convenient for
-            multi-board ownership; do NOT commit this file.
+            from your private build share a different topic.
         Topics that look like a placeholder ("CHANGE-ME-*", or fewer
         than 16 chars after trimming) refuse to push at runtime and
         the dashboard surfaces a red warning.
